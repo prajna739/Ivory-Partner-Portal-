@@ -1,0 +1,37 @@
+{
+  "loginUrl": "https://test-partner.liveivory.com/login",
+  "contactSupportUrl": "https://liveivory.com/about-us#contact",
+  "validEmail": "prajna@qaoncloud.com",
+  "validPassword": "ivory@123",
+  "invalidPassword": "Wrong@12345",
+  "invalidPasswordMessage": "Invalid password",
+  "unregisteredEmail": "anusha@qaoncloud.com",
+  "unregisteredPassword": "Test@12345",
+  "userNotFoundMessage": "User not found",
+  "invalidEmailPattern": "prajnaqaoncloud.com",
+  "invalidEmailPatternPassword": "Test@12345",
+  "invalidEmailPatternMessage": "Please enter a valid email address or phone number.",
+ "invalidPhones": [
+    {
+      "id": "TC_Login_014",
+      "case": "letters",
+      "value": "abcdefghij",
+      "password": "Test@12345",
+      "message": "Please enter a valid email address or phone number."
+    },
+    {
+      "id": "TC_Login_015",
+      "case": "too short",
+      "value": "89777",
+      "password": "Test@12345",
+      "message": "Please enter a valid email address or phone number."
+    },
+    {
+      "id": "TC_Login_016",
+      "case": "too long",
+      "value": "98765432109876543210",
+      "password": "Test@12345",
+      "message": "Please enter a valid email address or phone number."
+    }
+  ]
+}

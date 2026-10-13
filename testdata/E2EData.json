@@ -1,0 +1,38 @@
+{
+  "assessmentUrlLabel": "Users can access their assessments at:",
+  "partnerAssessmentUrl": "https://test-assess.liveivory.com",
+  "assignAssessmentButtonName": "Assign Assessment",
+  "dashboardCards": {
+    "total": "Total Assessments",
+    "notStarted": "Not Started",
+    "inProgress": "In Progress",
+    "completed": "Completed",
+    "completionRate": "Completion Rate"
+  },
+  "trendChart": {
+    "title": "Monthly Assessment Trends",
+    "legend": ["Assigned", "Completed"],
+    "legendColors": {
+      "Assigned": { "name": "blue", "hueMin": 190, "hueMax": 260 },
+      "Completed": { "name": "orange", "hueMin": 15, "hueMax": 50 }
+    },
+    "axisLabelPattern": { "x": "\\d{4}-\\d{2}", "y": "\\d+" },
+    "tooltip": { "monthPattern": "\\d{4}-\\d{2}", "hoverYRatio": 0.4, "stepPx": 5, "waitMs": 500 },
+    "periodDropdown": {
+      "loadingText": "Loading chart data...",
+      "periods": [
+        { "option": "Daily Trends",   "title": "Daily Assessment Trends",   "xPattern": "\\d{4}-\\d{2}-\\d{2}" },
+        { "option": "Weekly Trends",  "title": "Weekly Assessment Trends",  "xPattern": "\\d{4}-\\d{2}" },
+        { "option": "Monthly Trends", "title": "Monthly Assessment Trends", "xPattern": "\\d{4}-\\d{2}" },
+        { "option": "Yearly Trends",  "title": "Yearly Assessment Trends",  "xPattern": "\\d{4}" }
+      ]
+    },
+    "legendToggle": { "hueTolerance": 25, "dimDelta": 0.05 }
+  },
+  "recentCompleted": {
+    "title": "Recently Completed Assessments",
+    "viewAllText": "View all completed assessments",
+    "badgeText": "Completed",
+    "timePattern": "\\d{1,2}:\\d{2}"
+  }
+}
