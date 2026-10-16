@@ -34,5 +34,70 @@
     "viewAllText": "View all completed assessments",
     "badgeText": "Completed",
     "timePattern": "\\d{1,2}:\\d{2}"
+  },
+  "assessmentsPage": {
+    "pageTitle": "Assessments",
+    "heading": "Assessment Results",
+    "loadingText": "Loading assessments...",
+    "countPattern": "Showing \\d+ - \\d+ of \\d+ assessments",
+    "loadTimeoutMs": 15000,
+    "testTimeoutMs": 240000,
+    "cards": {
+      "total": "Total Assessments",
+      "assigned": "Assigned",
+      "inProcess": "In-Process",
+      "completed": "Completed"
+    },
+    "crossPageMap": {
+      "total": "total",
+      "assigned": "notStarted",
+      "inProcess": "inProgress",
+      "completed": "completed"
+    }
+  },
+  "filterPanel": {
+    "showButton": "Show Filters",
+    "hideButton": "Hide Filters",
+    "panelTitle": "Filter Assessments",
+    "controls": ["Assessment Type", "Status", "Start Date", "End Date"],
+    "resetButton": "Reset Filters",
+    "typeLabel": "Assessment Type",
+    "statusLabel": "Status",
+    "startDateLabel": "Start Date",
+    "endDateLabel": "End Date",
+    "defaultType": "All Types",
+    "defaultStatus": "All Statuses",
+    "statusesToCheck": ["Assigned", "In-Process", "Completed"],
+    "specificTypeIndex": 1,
+    "noResultsMessage": "No assessments found for the selected criteria.",
+    "bottomCountPattern": "Showing \\d+ to \\d+ of \\d+ results",
+    "settleMs": 700,
+    "dateFilter": { "startOffsetDays": 10, "endOffsetDays": 0 },
+    "combinedFilter": { "typeIndex": 3, "status": "Assigned", "startOffsetDays": 30, "endOffsetDays": 0 }
+  },
+  "assessmentSearch": {
+    "boxName": "Search name, phone, email or assessment type",
+    "clearButton": "Clear",
+    "settleMs": 600,
+    "searches": [
+      { "label": "User name", "term": "prajna", "matchRows": true },
+      { "label": "Phone number", "term": "8310076228", "matchRows": true },
+      { "label": "Email", "term": "prajna@qaoncloud.com", "matchRows": false },
+      { "label": "Assessment name", "term": "Trail Making Test (TMT)", "matchRows": true },
+      { "label": "Case-insensitive", "term": "PRAJNA", "matchRows": true, "sameTotalAs": "User name" },
+      { "label": "No match", "term": ".......", "matchRows": false, "expectNoResults": true }
+    ],
+    "clearTerm": "prajna",
+    "paginationName": "Pagination",
+    "paginationPage": 3,
+    "pageSearchTerm": "prajna"
+  },
+  "filterSearchFlow": {
+    "typeIndex": 3,
+    "status": "Assigned",
+    "searchTerm": "prajna",
+    "startOffsetDays": 1,
+    "endOffsetDays": -5,
+    "clearAllButton": "Clear Filters"
   }
 }

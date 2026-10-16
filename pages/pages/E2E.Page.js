@@ -51,6 +51,9 @@ const legendSame = (look, base, delta) =>
   (look.textLum === null || base.textLum === null || Math.abs(look.textLum - base.textLum) <= delta) &&
   (look.markerLum === null || base.markerLum === null || Math.abs(look.markerLum - base.markerLum) <= delta);
 
+// Path without a trailing slash, so "/assessments" and "/assessments/" count as the same page
+const normalizePath = (pathname) => pathname.replace(/\/+$/, '') || '/';
+
 export class E2EPage {
   constructor(page) {
     this.page = page;
@@ -798,7 +801,7 @@ export class E2EPage {
     await this.page.mouse.move(0, 0);
   }
 
-  // ---------- NEW: Recently Completed Assessments ----------
+  // ---------- Recently Completed Assessments ----------
 
   // Reads every item of the card. Items are found through their "Completed" badge, then the item row is the
   // largest ancestor that holds only that one badge. Nothing depends on class names, row numbers or text values.
@@ -948,4 +951,660 @@ export class E2EPage {
       'Items should be displayed from top to bottom in the order they were read'
     ).toBe(true);
   }
+
+  // ---------- NEW: "View all completed assessments →" redirects to the Assessments page ----------
+
+  // Clicks the link and verifies the Assessments page opens, then returns to the Dashboard so later steps are unaffected.
+  async verifyViewAllCompletedRedirect(rc, ap) {
+    const card = E2ELocators.recentCompletedCard(this.page, rc.title, rc.viewAllText);
+    const viewAll = E2ELocators.recentCompletedViewAll(card, rc.viewAllText);
+    const dashboardUrl = this.page.url();
+
+    // Where the Assessments page lives is taken from the Assessments tab's own link, not typed here
+    const href = await E2ELocators.tabItem(this.assessmentClick).evaluate((el) => {
+      const link = el.matches('a[href]') ? el : el.querySelector('a[href]') || el.closest('a[href]');
+      return link ? link.getAttribute('href') : null;
+    });
+    expect(href, 'The Assessments tab should be a link, so the expected page can be read from it').not.toBeNull();
+    const expectedPath = normalizePath(new URL(href, dashboardUrl).pathname);
+
+    // Click the link
+    await card.scrollIntoViewIfNeeded();
+    await expect(viewAll, `"${rc.viewAllText}" link`).toBeVisible();
+    await expect(viewAll, `"${rc.viewAllText}" link`).toBeEnabled();
+    await viewAll.click();
+
+    // Redirected to the Assessments page
+    await expect(this.page, `Clicking "${rc.viewAllText}" should open the page at ${expectedPath}`).toHaveURL(
+      (url) => normalizePath(url.pathname) === expectedPath,
+      { timeout: ap.loadTimeoutMs }
+    );
+    expect(this.page.url(), 'The URL should change after the click').not.toBe(dashboardUrl);
+    await this.verifyTabIsActive(this.assessmentClick);
+
+    // The page itself has loaded: heading shown, loading message gone, and a list with a total above zero
+    await expect(E2ELocators.assessmentsHeading(this.page, ap.heading), `"${ap.heading}" heading`).toBeVisible({
+      timeout: ap.loadTimeoutMs,
+    });
+    await expect(E2ELocators.assessmentsLoading(this.page, ap.loadingText), 'Assessments should finish loading').toBeHidden({
+      timeout: ap.loadTimeoutMs,
+    });
+
+    const count = E2ELocators.assessmentsCount(this.page, ap.countPattern);
+    await expect(count, 'Assessments count line').toBeVisible();
+    let total = 0;
+    await expect
+      .poll(
+        async () => {
+          // the total is the last number of the "Showing x - y of N assessments" line
+          const numbers = (await count.innerText()).match(/\d[\d,]*/g) || [];
+          total = numbers.length ? Number(numbers[numbers.length - 1].replace(/,/g, '')) : 0;
+          return total;
+        },
+        {
+          message: 'The Assessments page should list assessments (the Dashboard just showed completed ones)',
+          timeout: ap.loadTimeoutMs,
+        }
+      )
+      .toBeGreaterThan(0);
+
+    console.log('----- View all completed assessments -----');
+    console.log(`Clicked "${rc.viewAllText}" -> ${this.page.url()}`);
+    console.log(`Assessments page: "${ap.heading}" | ${(await count.innerText()).trim()} | total ${total}`);
+
+    // Back to the Dashboard so the steps that follow run exactly as before
+    await this.dashboardClick.click();
+    await this.verifyTabIsActive(this.dashboardClick);
+    await this.verifyWelcomeTest();
+  }
+  //--------------------------------------
+  //Assessment page
+  //---------------------------------------
+
+  // The page title is the heading of the Assessments page. The text comes from the data file.
+async verifyAssessmentsPageTitle(title, timeout) {
+    // a missing data value now fails with a clear message instead of "expected value must be a string"
+    expect(title, 'assessmentsPage.pageTitle is missing in E2EData.json').toBeTruthy();
+
+    const heading = E2ELocators.assessmentsPageTitle(this.page, title);
+    await expect(heading, `Page title "${title}"`).toBeVisible({ timeout });
+    await expect(heading, `Page title "${title}"`).toHaveText(title);
+    console.log(`Page title shown: "${(await heading.innerText()).trim()}"`);
+  }
+
+  // The page remembers the last state of the panel, so it is not assumed: first make sure it is hidden
+  async resetFilterPanelToHidden(fp) {
+    const showBtn = E2ELocators.filterToggle(this.page, fp.showButton);
+    const hideBtn = E2ELocators.filterToggle(this.page, fp.hideButton);
+
+    await expect(showBtn.or(hideBtn), 'The filter toggle button').toBeVisible();
+    if (await hideBtn.isVisible()) {
+      await hideBtn.click();
+    }
+    await expect(showBtn, `"${fp.showButton}" button`).toBeVisible();
+    await expect(E2ELocators.filterPanelTitle(this.page, fp.panelTitle), `"${fp.panelTitle}" panel`).toBeHidden();
+  }
+
+  // 1. Click "Show Filters"
+  async clickShowFilters(fp) {
+    const showBtn = E2ELocators.filterToggle(this.page, fp.showButton);
+    await expect(showBtn, `"${fp.showButton}" button`).toBeVisible();
+    await expect(showBtn, `"${fp.showButton}" button`).toBeEnabled();
+    await showBtn.click();
+  }
+
+  // 2. The "Filter Assessments" panel is displayed with its filters, and the button now reads "Hide Filters"
+  async verifyFilterPanelDisplayed(fp) {
+    const panel = E2ELocators.filterPanel(this.page, fp.panelTitle, fp.resetButton);
+
+    await expect(E2ELocators.filterPanelTitle(this.page, fp.panelTitle), `"${fp.panelTitle}" panel title`).toBeVisible();
+    for (const label of fp.controls) {
+      await expect(E2ELocators.filterPanelControl(panel, label), `Filter "${label}"`).toBeVisible();
+    }
+    const reset = E2ELocators.filterPanelReset(panel, fp.resetButton);
+    await expect(reset, `"${fp.resetButton}" button`).toBeVisible();
+    await expect(reset, `"${fp.resetButton}" button`).toBeEnabled();
+
+    // the toggle swaps its label
+    await expect(E2ELocators.filterToggle(this.page, fp.hideButton), `"${fp.hideButton}" button`).toBeVisible();
+    await expect(E2ELocators.filterToggle(this.page, fp.showButton), `"${fp.showButton}" button`).toBeHidden();
+
+    console.log('----- Filters -----');
+    console.log(`"${fp.panelTitle}" displayed: ${fp.controls.join(', ')}, ${fp.resetButton}`);
+  }
+
+  // 3. Click "Hide Filters"
+  async clickHideFilters(fp) {
+    const hideBtn = E2ELocators.filterToggle(this.page, fp.hideButton);
+    await expect(hideBtn, `"${fp.hideButton}" button`).toBeVisible();
+    await expect(hideBtn, `"${fp.hideButton}" button`).toBeEnabled();
+    await hideBtn.click();
+  }
+
+  // ...the panel and all its filters are gone, and the button reads "Show Filters" again
+  async verifyFilterPanelHidden(fp) {
+    const panel = E2ELocators.filterPanel(this.page, fp.panelTitle, fp.resetButton);
+
+    await expect(E2ELocators.filterPanelTitle(this.page, fp.panelTitle), `"${fp.panelTitle}" panel title`).toBeHidden();
+    for (const label of fp.controls) {
+      await expect(E2ELocators.filterPanelControl(panel, label), `Filter "${label}"`).toBeHidden();
+    }
+    await expect(E2ELocators.filterPanelReset(panel, fp.resetButton), `"${fp.resetButton}" button`).toBeHidden();
+
+    await expect(E2ELocators.filterToggle(this.page, fp.showButton), `"${fp.showButton}" button`).toBeVisible();
+    await expect(E2ELocators.filterToggle(this.page, fp.hideButton), `"${fp.hideButton}" button`).toBeHidden();
+
+    console.log(`"${fp.panelTitle}" hidden after "${fp.hideButton}"`);
+  }
+
+//new
+  // ---------- NEW: Assessment filters (type, status, date, reset) ----------
+
+  #panel(fp) {
+    for (const key of ['typeLabel', 'statusLabel', 'startDateLabel', 'endDateLabel', 'defaultType', 'defaultStatus',
+      'statusesToCheck', 'specificTypeIndex', 'noResultsMessage', 'bottomCountPattern', 'settleMs', 'dateFilter']) {
+      expect(fp[key], `filterPanel.${key} is missing in E2EData.json`).toBeDefined();
+    }
+    return E2ELocators.filterPanel(this.page, fp.panelTitle, fp.resetButton);
+  }
+
+  // Reads "Showing x - y of N assessments" and returns N
+  async #topTotal(ap) {
+    const text = await E2ELocators.assessmentsCount(this.page, ap.countPattern).innerText();
+    const numbers = text.match(/\d[\d,]*/g) || [];
+    return numbers.length ? Number(numbers[numbers.length - 1].replace(/,/g, '')) : 0;
+  }
+
+  // Waits for the list to settle and returns what it ended up showing
+  async #settledResults(ap, fp) {
+    await this.page.waitForTimeout(fp.settleMs); // give the loading state time to start
+    const loading = E2ELocators.assessmentsLoading(this.page, ap.loadingText);
+    const none = E2ELocators.noResultsMessage(this.page, fp.noResultsMessage);
+    const bottom = E2ELocators.bottomCount(this.page, fp.bottomCountPattern);
+
+    await expect(loading, 'Assessments should finish loading').toBeHidden({ timeout: ap.loadTimeoutMs });
+    // Results are shown when there is a "no assessments" message, a bottom total, or at least one row
+    // (a single page of results has no bottom footer)
+    const rows = E2ELocators.assessmentRows(this.page);
+    await expect
+      .poll(async () => (await none.isVisible()) || (await bottom.first().isVisible()) || (await rows.count()) > 0, {
+        message: 'Either results or the "no assessments" message should be displayed',
+        timeout: ap.loadTimeoutMs,
+      })
+      .toBe(true);
+
+    const hasNone = await none.isVisible();
+    return { hasNone, total: await this.#topTotal(ap), bottom, none };
+  }
+
+  // Result rule: results + bottom total count, otherwise the no-results message
+  async #verifyResultsOrMessage(label, ap, fp, rowText) {
+    const r = await this.#settledResults(ap, fp);
+
+    if (r.hasNone) {
+      await expect(r.none, `${label}: message`).toHaveText(fp.noResultsMessage);
+      // The "Showing x - y of N" line above can still show the previous list's numbers when nothing matches,
+      // so it is not used here. What matters: the message is shown and no result rows are listed.
+      await expect(E2ELocators.assessmentRows(this.page), `${label}: no result rows should be listed`).toHaveCount(0);
+      console.log(`${label}: "${fp.noResultsMessage}"`);
+      return 0;
+    }
+
+    expect(r.total, `${label}: results should be listed`).toBeGreaterThan(0);
+    const rowCount = await E2ELocators.assessmentRows(this.page).count();
+
+    let bottomText;
+    if (await r.bottom.first().isVisible()) {
+      await r.bottom.first().scrollIntoViewIfNeeded();
+      await expect(r.bottom.first(), `${label}: bottom total count`).toBeVisible();
+      bottomText = (await r.bottom.first().innerText()).trim();
+      const bottomTotal = Number((bottomText.match(/\d[\d,]*/g) || ['0']).pop().replace(/,/g, ''));
+      expect.soft(bottomTotal, `${label}: bottom total should match the total at the top`).toBe(r.total);
+    } else {
+      // When everything fits on one page the portal shows no footer; the total at the top must equal the rows shown
+      expect.soft(rowCount, `${label}: with no bottom footer, all ${r.total} results should fit on one page`).toBe(r.total);
+      bottomText = `(no bottom footer: all ${rowCount} results fit on one page)`;
+    }
+
+    // Every row on screen should match the chosen filter (compared ignoring case and punctuation)
+    if (rowText) {
+      const clean = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const rows = await E2ELocators.assessmentRows(this.page).allInnerTexts();
+      const bad = rows.filter((row) => !clean(row).includes(clean(rowText)));
+      expect.soft(bad.length, `${label}: every row should show "${rowText}"`).toBe(0);
+    }
+    console.log(`${label}: results shown | top total ${r.total} | bottom: "${bottomText}"`);
+    return r.total;
+  }
+
+  // Opens the Assessment Type and Status lists, prints their values and checks the defaults
+  async verifyFilterDropdownValues(fp) {
+    const panel = this.#panel(fp);
+    for (const [label, def] of [[fp.typeLabel, fp.defaultType], [fp.statusLabel, fp.defaultStatus]]) {
+      const select = E2ELocators.filterSelect(panel, label);
+      await expect(select, `${label} dropdown`).toBeVisible();
+      const values = (await select.locator('option').allInnerTexts()).map((v) => v.trim());
+      const selected = await select.evaluate((el) => el.options[el.selectedIndex].text.trim());
+      console.log(`${label} values (${values.length}): ${values.join(' | ')}`);
+      console.log(`${label} selected by default: "${selected}"`);
+      expect(values, `${label} should offer "${def}"`).toContain(def);
+      expect(selected, `${label} default`).toBe(def);
+    }
+  }
+
+  // "All Types" shows everything with a bottom total; returns the unfiltered total
+  async verifyAllTypes(ap, fp) {
+    const select = E2ELocators.filterSelect(this.#panel(fp), fp.typeLabel);
+    await select.selectOption({ label: fp.defaultType });
+    const total = await this.#verifyResultsOrMessage(`Type "${fp.defaultType}"`, ap, fp);
+    expect(total, 'All Types should list every assessment').toBeGreaterThan(0);
+    return total;
+  }
+
+  // Picks one specific type (position comes from the data file) and checks the outcome
+  async verifySpecificType(ap, fp) {
+    const select = E2ELocators.filterSelect(this.#panel(fp), fp.typeLabel);
+    const options = (await select.locator('option').allInnerTexts()).map((v) => v.trim());
+    const name = options[Math.min(fp.specificTypeIndex, options.length - 1)];
+    await select.selectOption({ label: name });
+    await this.#verifyResultsOrMessage(`Type "${name}"`, ap, fp, name);
+    await select.selectOption({ label: fp.defaultType }); // back to default for the next step
+    await this.#settledResults(ap, fp);
+  }
+
+  // "All Statuses" shows everything with a bottom total
+  async verifyAllStatuses(ap, fp, expectedTotal) {
+    const select = E2ELocators.filterSelect(this.#panel(fp), fp.statusLabel);
+    await select.selectOption({ label: fp.defaultStatus });
+    const total = await this.#verifyResultsOrMessage(`Status "${fp.defaultStatus}"`, ap, fp);
+    expect.soft(total, 'All Statuses should list the same total as All Types').toBe(expectedTotal);
+  }
+
+  // Selects one status (name from the data file) and checks results/message
+  async verifyStatus(statusName, ap, fp) {
+    const select = E2ELocators.filterSelect(this.#panel(fp), fp.statusLabel);
+    const options = (await select.locator('option').allInnerTexts()).map((v) => v.trim());
+    expect(options, `Status list should contain "${statusName}"`).toContain(statusName);
+    await select.selectOption({ label: statusName });
+    return this.#verifyResultsOrMessage(`Status "${statusName}"`, ap, fp, statusName);
+  }
+
+  // Sets a start/end date relative to today (offsets come from the data file)
+  async verifyDateFilter(ap, fp) {
+    const panel = this.#panel(fp);
+    const iso = (offset) => {
+      const d = new Date();
+      d.setDate(d.getDate() - offset);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const start = iso(fp.dateFilter.startOffsetDays);
+    const end = iso(fp.dateFilter.endOffsetDays);
+    await E2ELocators.filterDateInput(panel, fp.startDateLabel).fill(start);
+    await E2ELocators.filterDateInput(panel, fp.endDateLabel).fill(end);
+    console.log(`Dates selected: ${start} to ${end}`);
+    await this.#verifyResultsOrMessage(`Date ${start} to ${end}`, ap, fp);
+  }
+
+  // Reset Filters returns every control and the list to the starting state
+  async clickResetFilters(ap, fp, expectedTotal) {
+    const panel = this.#panel(fp);
+    await E2ELocators.filterPanelReset(panel, fp.resetButton).click();
+    await this.#settledResults(ap, fp);
+
+    const typeText = await E2ELocators.filterSelect(panel, fp.typeLabel).evaluate((el) => el.options[el.selectedIndex].text.trim());
+    const statusText = await E2ELocators.filterSelect(panel, fp.statusLabel).evaluate((el) => el.options[el.selectedIndex].text.trim());
+    expect(typeText, 'Assessment Type after reset').toBe(fp.defaultType);
+    expect(statusText, 'Status after reset').toBe(fp.defaultStatus);
+    await expect(E2ELocators.filterDateInput(panel, fp.startDateLabel), 'Start Date after reset').toHaveValue('');
+    await expect(E2ELocators.filterDateInput(panel, fp.endDateLabel), 'End Date after reset').toHaveValue('');
+    expect(await this.#topTotal(ap), 'Total after reset').toBe(expectedTotal);
+    console.log(`Reset Filters: defaults restored, total back to ${expectedTotal}`);
+  }
+    // ---------- NEW: combined filters (type + status, type + status + date) ----------
+
+  #combinedConfig(fp) {
+    // Uses "combinedFilter" from E2EData.json when present; otherwise falls back to the existing filterPanel values
+    return (
+      fp.combinedFilter ?? {
+        typeIndex: fp.specificTypeIndex,
+        status: fp.statusesToCheck[fp.statusesToCheck.length - 1],
+        startOffsetDays: fp.dateFilter.startOffsetDays,
+        endOffsetDays: fp.dateFilter.endOffsetDays,
+      }
+    );
+  }
+
+  // Every row on screen must contain every selected value (compared ignoring case and punctuation)
+  async #verifyRowsMatchAll(label, texts) {
+    const clean = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const rows = await E2ELocators.assessmentRows(this.page).allInnerTexts();
+    for (const text of texts) {
+      const bad = rows.filter((row) => !clean(row).includes(clean(text)));
+      expect.soft(bad.length, `${label}: every row should show "${text}"`).toBe(0);
+    }
+  }
+
+  // 1. Assessment Type + Status together. Returns the combined total.
+  async verifyTypeAndStatusFilter(ap, fp) {
+    const cf = this.#combinedConfig(fp);
+    const panel = this.#panel(fp);
+    const typeSelect = E2ELocators.filterSelect(panel, fp.typeLabel);
+    const statusSelect = E2ELocators.filterSelect(panel, fp.statusLabel);
+
+    const types = (await typeSelect.locator('option').allInnerTexts()).map((v) => v.trim());
+    const typeName = types[Math.min(cf.typeIndex, types.length - 1)];
+    const statuses = (await statusSelect.locator('option').allInnerTexts()).map((v) => v.trim());
+    expect(statuses, `Status list should contain "${cf.status}"`).toContain(cf.status);
+
+    console.log('----- Combined filters: Type + Status -----');
+
+    // Type alone first, so the combination can be compared with it
+    await typeSelect.selectOption({ label: typeName });
+    const typeOnly = await this.#verifyResultsOrMessage(`Type "${typeName}"`, ap, fp, typeName);
+
+    // Add the status on top
+    await statusSelect.selectOption({ label: cf.status });
+    const label = `Type "${typeName}" + Status "${cf.status}"`;
+    const combined = await this.#verifyResultsOrMessage(label, ap, fp);
+    if (combined > 0) {
+      await this.#verifyRowsMatchAll(label, [typeName, cf.status]);
+    }
+    expect.soft(combined, `${label}: combining filters can only narrow the results (type alone: ${typeOnly})`).toBeLessThanOrEqual(typeOnly);
+    return combined;
+  }
+
+  // 2. Assessment Type + Status + Date together (type and status stay selected from the previous step)
+  async verifyTypeStatusAndDateFilter(ap, fp, typeStatusTotal) {
+    const cf = this.#combinedConfig(fp);
+    const panel = this.#panel(fp);
+
+    const typeSelect = E2ELocators.filterSelect(panel, fp.typeLabel);
+    const statusSelect = E2ELocators.filterSelect(panel, fp.statusLabel);
+    const typeName = (await typeSelect.evaluate((el) => el.options[el.selectedIndex].text)).trim();
+    const statusName = (await statusSelect.evaluate((el) => el.options[el.selectedIndex].text)).trim();
+    expect(typeName, 'Assessment Type should still be selected from the previous step').not.toBe(fp.defaultType);
+    expect(statusName, 'Status should still be selected from the previous step').not.toBe(fp.defaultStatus);
+
+    const iso = (offset) => {
+      const d = new Date();
+      d.setDate(d.getDate() - offset);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const start = iso(cf.startOffsetDays);
+    const end = iso(cf.endOffsetDays);
+
+    console.log('----- Combined filters: Type + Status + Date -----');
+    await E2ELocators.filterDateInput(panel, fp.startDateLabel).fill(start);
+    await E2ELocators.filterDateInput(panel, fp.endDateLabel).fill(end);
+
+    const label = `Type "${typeName}" + Status "${statusName}" + Date ${start} to ${end}`;
+    const total = await this.#verifyResultsOrMessage(label, ap, fp);
+    if (total > 0) {
+      await this.#verifyRowsMatchAll(label, [typeName, statusName]);
+    }
+    expect.soft(total, `${label}: adding a date can only narrow the results (without date: ${typeStatusTotal})`).toBeLessThanOrEqual(typeStatusTotal);
+    return total;
+  }
+   // ---------- NEW: Assessments page stat cards (Total, Assigned, In-Process, Completed) ----------
+
+  // 1. Every card shows its label and a count (any number; the page first shows "..." while loading, so this waits)
+  async verifyAssessmentCards(cards, timeout) {
+    expect(cards, 'assessmentsPage.cards is missing in E2EData.json').toBeDefined();
+
+    for (const label of Object.values(cards)) {
+      await expect(E2ELocators.dashboardCardLabel(this.page, label), `Label "${label}"`).toBeVisible({ timeout });
+      await expect(E2ELocators.dashboardCardValue(this.page, label), `Value of "${label}"`).toHaveText(/^\s*\d[\d,]*\s*$/, {
+        timeout,
+      });
+    }
+  }
+
+  // 2. Reads the current values, prints them and returns them as numbers
+  async getAssessmentCardValues(cards) {
+    const read = async (label) => {
+      const text = await E2ELocators.dashboardCardValue(this.page, label).innerText();
+      return Number(text.replace(/[^\d]/g, ''));
+    };
+
+    const values = {
+      total: await read(cards.total),
+      assigned: await read(cards.assigned),
+      inProcess: await read(cards.inProcess),
+      completed: await read(cards.completed),
+    };
+
+    console.log('----- Assessments card values -----');
+    console.log(`${cards.total}: ${values.total}`);
+    console.log(`${cards.assigned}: ${values.assigned}`);
+    console.log(`${cards.inProcess}: ${values.inProcess}`);
+    console.log(`${cards.completed}: ${values.completed}`);
+    return values;
+  }
+
+  // 3. Assigned + In-Process + Completed must equal Total (the numbers change, so only the present values are used)
+  verifyAssessmentCardsSum(cards, values) {
+    const sum = values.assigned + values.inProcess + values.completed;
+    console.log(
+      `Sum: ${cards.assigned} (${values.assigned}) + ${cards.inProcess} (${values.inProcess}) + ` +
+      `${cards.completed} (${values.completed}) = ${sum} | ${cards.total}: ${values.total}`
+    );
+    expect(sum, `${cards.assigned} + ${cards.inProcess} + ${cards.completed} should equal ${cards.total}`).toBe(values.total);
+  } 
+    // ---------- NEW: Assessments cards must match the Dashboard cards ----------
+
+  // Opens the Dashboard, reads its cards, compares them with the values read on the Assessments page,
+  // then returns to the Assessments page so the steps that follow run exactly as before.
+  async verifyAssessmentCardsMatchDashboard(ap, dashboardCards, assessmentValues) {
+    expect(ap.crossPageMap, 'assessmentsPage.crossPageMap is missing in E2EData.json').toBeDefined();
+
+    // Go to the Dashboard and wait until its cards show real numbers
+    await this.dashboardClick.click();
+    await this.verifyTabIsActive(this.dashboardClick);
+    await this.verifyWelcomeTest();
+    await this.verifyDashboardCards(dashboardCards);
+    const dashboardValues = await this.getDashboardCardValues(dashboardCards);
+
+    // Compare each Assessments card with its Dashboard card
+    console.log('----- Assessments cards vs Dashboard cards -----');
+    for (const [assessmentKey, dashboardKey] of Object.entries(ap.crossPageMap)) {
+      const assessmentLabel = ap.cards[assessmentKey];
+      const dashboardLabel = dashboardCards[dashboardKey];
+      const onAssessments = assessmentValues[assessmentKey];
+      const onDashboard = dashboardValues[dashboardKey];
+
+      console.log(`${assessmentLabel} (Assessments): ${onAssessments} | ${dashboardLabel} (Dashboard): ${onDashboard}`);
+      expect.soft(
+        onAssessments,
+        `Assessments "${assessmentLabel}" should match Dashboard "${dashboardLabel}"`
+      ).toBe(onDashboard);
+    }
+
+    // Back to the Assessments page
+    await this.assessmentClick.click();
+    await this.verifyTabIsActive(this.assessmentClick);
+    await this.verifyAssessmentsPageTitle(ap.pageTitle, ap.loadTimeoutMs);
+    await this.verifyAssessmentCards(ap.cards, ap.loadTimeoutMs);
+  }
+    // ---------- NEW: Assessment search ----------
+
+  #searchBox(sb) {
+    expect(sb, 'assessmentSearch is missing in E2EData.json').toBeDefined();
+    return E2ELocators.searchBox(this.page, sb.boxName);
+  }
+
+  // The total of the list as it is now (used as the "before" value for the Clear check)
+  async getAssessmentsTotal(ap) {
+    return this.#topTotal(ap);
+  }
+
+  // 1-6. Search by user name, phone, email, assessment name, upper-case text and a text with no match
+  async verifySearchCases(ap, fp, sb) {
+    const box = this.#searchBox(sb);
+    await box.scrollIntoViewIfNeeded();
+    await expect(box, 'Search box').toBeVisible();
+    await expect(box, 'Search box').toBeEnabled();
+
+    console.log('----- Search -----');
+    const totals = {};
+    for (const search of sb.searches) {
+      const label = `Search by ${search.label} "${search.term}"`;
+
+      await box.fill(search.term);
+      await this.page.waitForTimeout(sb.settleMs);   // the list refreshes shortly after typing
+
+      // results with a bottom total, or the "no assessments" message (rows must contain the text when asked)
+      const total = await this.#verifyResultsOrMessage(label, ap, fp, search.matchRows ? search.term : undefined);
+      totals[search.label] = total;
+      console.log(`${label} -> total count: ${total}`);
+
+      if (search.expectNoResults) {
+        expect(total, `${label}: nothing should be found`).toBe(0);
+        await expect(E2ELocators.noResultsMessage(this.page, fp.noResultsMessage), `${label}: message`).toBeVisible();
+      }
+      if (search.sameTotalAs) {
+        expect.soft(
+          total,
+          `${label}: should find the same total as "${search.sameTotalAs}" (search is not case-sensitive)`
+        ).toBe(totals[search.sameTotalAs]);
+      }
+    }
+  }
+
+  // 7. Type anything, click "Clear": the box is emptied and the full list comes back
+  async verifySearchClear(ap, fp, sb, expectedTotal) {
+    const box = this.#searchBox(sb);
+    const clear = E2ELocators.searchClear(this.page, sb.clearButton);
+
+    await box.scrollIntoViewIfNeeded();
+    await box.fill(sb.clearTerm);
+    await expect(clear, `"${sb.clearButton}" button`).toBeVisible();
+    await expect(clear, `"${sb.clearButton}" button`).toBeEnabled();
+    await clear.click();
+
+    await expect(box, 'Search box after clear').toHaveValue('');
+    await expect
+      .poll(() => this.#topTotal(ap), {
+        message: `Total should return to ${expectedTotal} after "${sb.clearButton}"`,
+        timeout: ap.loadTimeoutMs,
+      })
+      .toBe(expectedTotal);
+    await expect.soft(clear, `"${sb.clearButton}" button should be gone once the box is empty`).toBeHidden();
+
+    console.log(`Clear: search box emptied, total back to ${expectedTotal}`);
+  }
+
+  // 8. Go to page N, then search by name: results (with a bottom total) or the "no assessments" message
+  async verifySearchOnPage3(ap, fp, sb) {
+    const box = this.#searchBox(sb);
+    const bottom = E2ELocators.bottomCount(this.page, fp.bottomCountPattern).first();
+    const pageButton = E2ELocators.paginationButton(this.page, sb.paginationName, sb.paginationPage);
+
+    // start from the full list; work out the page size from "Showing 1 to 10 of N results"
+    await box.fill('');
+    await this.#settledResults(ap, fp);
+    const firstText = (await bottom.innerText()).trim();
+    const [start, end] = (firstText.match(/\d[\d,]*/g) || []).map((v) => Number(v.replace(/,/g, '')));
+    const pageSize = end - start + 1;
+    const expectedStart = (sb.paginationPage - 1) * pageSize + 1;
+
+    console.log('----- Search on a later page -----');
+    await pageButton.scrollIntoViewIfNeeded();
+    await expect(pageButton, `Page ${sb.paginationPage} button`).toBeVisible();
+    await pageButton.click();
+    await expect(bottom, `Should be on page ${sb.paginationPage}`).toHaveText(new RegExp(`Showing ${expectedStart} to`));
+    console.log(`On page ${sb.paginationPage}: "${(await bottom.innerText()).trim()}"`);
+
+    // now search by name
+    await box.fill(sb.pageSearchTerm);
+    await this.page.waitForTimeout(sb.settleMs);
+    const label = `Search "${sb.pageSearchTerm}" from page ${sb.paginationPage}`;
+    const total = await this.#verifyResultsOrMessage(label, ap, fp, sb.pageSearchTerm);
+    console.log(`${label} -> total count: ${total}`);
+
+    // leave the page clean for whatever follows
+    await box.fill('');
+    await this.#settledResults(ap, fp);
+  }
+      // ---------- NEW: Type + Status + Search + Date, then "Clear Filters" and "Reset Filters" ----------
+
+  // 2-3. Select a type, then a status, then search by name, then add a dates; each step shows results or the message
+  async verifyTypeStatusSearchAndDate(ap, fp, sb, fl) {
+    expect(fl, 'filterSearchFlow is missing in E2EData.json').toBeDefined();
+    const panel = this.#panel(fp);
+    const typeSelect = E2ELocators.filterSelect(panel, fp.typeLabel);
+    const statusSelect = E2ELocators.filterSelect(panel, fp.statusLabel);
+    const box = this.#searchBox(sb);
+
+    const types = (await typeSelect.locator('option').allInnerTexts()).map((v) => v.trim());
+    const typeName = types[Math.min(fl.typeIndex, types.length - 1)];
+    const statuses = (await statusSelect.locator('option').allInnerTexts()).map((v) => v.trim());
+    expect(statuses, `Status list should contain "${fl.status}"`).toContain(fl.status);
+
+    console.log('----- Type + Status + Search + Date -----');
+
+    // 2a. Assessment Type
+    await typeSelect.selectOption({ label: typeName });
+    await this.#verifyResultsOrMessage(`Type "${typeName}"`, ap, fp, typeName);
+
+    // 2b. Status
+    await statusSelect.selectOption({ label: fl.status });
+    const statusLabel = `Type "${typeName}" + Status "${fl.status}"`;
+    const typeStatusTotal = await this.#verifyResultsOrMessage(statusLabel, ap, fp);
+    if (typeStatusTotal > 0) await this.#verifyRowsMatchAll(statusLabel, [typeName, fl.status]);
+
+    // 2c. Search by name
+    await box.scrollIntoViewIfNeeded();
+    await box.fill(fl.searchTerm);
+    await this.page.waitForTimeout(sb.settleMs);
+    const searchLabel = `${statusLabel} + Search "${fl.searchTerm}"`;
+    const searchTotal = await this.#verifyResultsOrMessage(searchLabel, ap, fp, fl.searchTerm);
+    if (searchTotal > 0) await this.#verifyRowsMatchAll(searchLabel, [typeName, fl.status]);
+    console.log(`${searchLabel} -> total count: ${searchTotal}`);
+    expect.soft(searchTotal, `${searchLabel}: adding a search can only narrow the results (before: ${typeStatusTotal})`).toBeLessThanOrEqual(typeStatusTotal);
+
+    // 3. Dates on top of type + status + search (offsets are days before today; negative = in the future)
+    const iso = (offset) => {
+      const d = new Date();
+      d.setDate(d.getDate() - offset);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const start = iso(fl.startOffsetDays);
+    const end = iso(fl.endOffsetDays);
+    await E2ELocators.filterDateInput(panel, fp.startDateLabel).fill(start);
+    await E2ELocators.filterDateInput(panel, fp.endDateLabel).fill(end);
+    const dateLabel = `${searchLabel} + Date ${start} to ${end}`;
+    const dateTotal = await this.#verifyResultsOrMessage(dateLabel, ap, fp);
+    console.log(`${dateLabel} -> total count: ${dateTotal}`);
+    expect.soft(dateTotal, `${dateLabel}: adding dates can only narrow the results (before: ${searchTotal})`).toBeLessThanOrEqual(searchTotal);
+  }
+
+  // 4. "Clear Filters" at the top clears the type, status, dates AND the search box
+  async clickClearFilters(ap, fp, sb, fl, expectedTotal) {
+    const clearAll = E2ELocators.clearAllFilters(this.page, fl.clearAllButton);
+    const panel = this.#panel(fp);
+
+    await clearAll.scrollIntoViewIfNeeded();
+    await expect(clearAll, `"${fl.clearAllButton}" button`).toBeVisible();
+    await expect(clearAll, `"${fl.clearAllButton}" button`).toBeEnabled();
+    await clearAll.click();
+    await this.#settledResults(ap, fp);
+
+    const typeText = await E2ELocators.filterSelect(panel, fp.typeLabel).evaluate((el) => el.options[el.selectedIndex].text.trim());
+    const statusText = await E2ELocators.filterSelect(panel, fp.statusLabel).evaluate((el) => el.options[el.selectedIndex].text.trim());
+    expect(typeText, 'Assessment Type after Clear Filters').toBe(fp.defaultType);
+    expect(statusText, 'Status after Clear Filters').toBe(fp.defaultStatus);
+    await expect(E2ELocators.filterDateInput(panel, fp.startDateLabel), 'Start Date after Clear Filters').toHaveValue('');
+    await expect(E2ELocators.filterDateInput(panel, fp.endDateLabel), 'End Date after Clear Filters').toHaveValue('');
+    await expect(this.#searchBox(sb), 'Search box after Clear Filters').toHaveValue('');
+    await expect
+      .poll(() => this.#topTotal(ap), {
+        message: `Total should return to ${expectedTotal} after "${fl.clearAllButton}"`,
+        timeout: ap.loadTimeoutMs,
+      })
+      .toBe(expectedTotal);
+    await expect.soft(clearAll, `"${fl.clearAllButton}" button should be gone once nothing is filtered`).toBeHidden();
+
+    console.log(`"${fl.clearAllButton}": type, status, dates and search cleared, total back to ${expectedTotal}`);
+  }
+  
 }

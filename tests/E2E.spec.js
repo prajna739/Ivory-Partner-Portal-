@@ -78,8 +78,11 @@ test.describe('Ivory-PartnerLogin', () => {
     // Legend toggle - click Assigned / Completed to disable, click again to enable
     await dashboard.verifyTrendLegendToggle(chart);
 
-    // NEW: Recently Completed Assessments - values, item parts, sort order
+    // Recently Completed Assessments - values, item parts, sort order
     await dashboard.verifyRecentCompletedAssessments(e2eData.recentCompleted);
+
+    // NEW: click "View all completed assessments →", verify the Assessments page opens, return to the Dashboard
+    await dashboard.verifyViewAllCompletedRedirect(e2eData.recentCompleted, e2eData.assessmentsPage);
 
     // Navigate through the remaining tabs, checking the active highlight on each
     await dashboard.clickAssessmentClick();
@@ -94,5 +97,84 @@ test.describe('Ivory-PartnerLogin', () => {
     await dashboard.clickProductClick();
     await dashboard.verifyTabIsActive(dashboard.productClick);
     await dashboard.verifyTabIsNotActive(dashboard.userClick);
+  });
+
+
+  test('Assessment', async ({ page }) => {
+    // Long end-to-end flow (filters, cards, search): the timeout comes from the data file
+    test.setTimeout(e2eData.assessmentsPage.testTimeoutMs);
+
+    const nav = new E2EPage(page);
+    const ap = e2eData.assessmentsPage;
+
+    // Log in first so the portal is reachable
+    await login.fillEmail(loginData.validEmail);
+    await login.fillPassword(loginData.validPassword);
+    await login.checkTermsCheckbox();
+    await login.verifySignInButtonEnabled();
+    await login.clickSignIn();
+
+    await expect(nav.logoImage).toBeVisible();
+    await nav.verifyWelcomeTest();                          // landed on the Dashboard
+    await nav.verifyTabIsNotActive(nav.assessmentClick);    // Assessments is not the active tab yet
+
+    // 1. Click the Assessments tab
+    await nav.clickAssessmentClick();
+
+    // 2. Verify the page title and that the Assessments tab is highlighted
+    await nav.verifyAssessmentsPageTitle(ap.pageTitle, ap.loadTimeoutMs);
+    await expect(nav.welcomeTest).toBeHidden();             // the Dashboard content is gone
+
+    await nav.verifyTabIsActive(nav.assessmentClick);
+    await nav.verifyTabIsHighlighted(nav.assessmentClick, nav.dashboardClick);
+    await nav.verifyTabIsNotActive(nav.dashboardClick);
+    await nav.verifyTabIsNotActive(nav.userClick);
+    await nav.verifyTabIsNotActive(nav.productClick);
+    
+    const fp = e2eData.filterPanel;
+    await nav.resetFilterPanelToHidden(fp);    
+    await nav.clickShowFilters(fp);              
+    await nav.verifyFilterPanelDisplayed(fp);    
+    await nav.clickHideFilters(fp);              
+    await nav.verifyFilterPanelHidden(fp); 
+    
+        // ---- filters: values, results, date, reset ----
+    await nav.clickShowFilters(fp);
+    await nav.verifyFilterPanelDisplayed(fp);
+    await nav.verifyFilterDropdownValues(fp);
+
+    const totalAll = await nav.verifyAllTypes(ap, fp);
+    await nav.verifySpecificType(ap, fp);
+    await nav.verifyAllStatuses(ap, fp, totalAll);
+    for (const status of fp.statusesToCheck) {
+      await nav.verifyStatus(status, ap, fp);
+    }
+    await nav.verifyDateFilter(ap, fp);
+    await nav.clickResetFilters(ap, fp, totalAll);
+        // ---- combined filters ----
+    const typeStatusTotal = await nav.verifyTypeAndStatusFilter(ap, fp);
+    await nav.verifyTypeStatusAndDateFilter(ap, fp, typeStatusTotal);
+    await nav.clickResetFilters(ap, fp, totalAll);
+        // ---- Assessments page stat cards ----
+    await nav.verifyAssessmentCards(ap.cards, ap.loadTimeoutMs);
+    const cardValues = await nav.getAssessmentCardValues(ap.cards);
+    nav.verifyAssessmentCardsSum(ap.cards, cardValues);
+    await nav.verifyAssessmentCardsMatchDashboard(ap, e2eData.dashboardCards, cardValues);
+        // ---- search ----
+    const sb = e2eData.assessmentSearch;
+    const totalBeforeSearch = await nav.getAssessmentsTotal(ap);
+    await nav.verifySearchCases(ap, fp, sb);
+    await nav.verifySearchClear(ap, fp, sb, totalBeforeSearch);
+    await nav.verifySearchOnPage3(ap, fp, sb);
+
+        // ---- type + status + search + date, Clear Filters, Reset Filters ----
+    const fl = e2eData.filterSearchFlow;
+    const baseTotal = await nav.getAssessmentsTotal(ap);
+    await nav.resetFilterPanelToHidden(fp);
+    await nav.clickShowFilters(fp);                       
+    await nav.verifyFilterPanelDisplayed(fp);
+    await nav.verifyTypeStatusSearchAndDate(ap, fp, sb, fl);   
+    await nav.clickClearFilters(ap, fp, sb, fl, baseTotal);    
+    await nav.clickResetFilters(ap, fp, baseTotal);            
   });
 });

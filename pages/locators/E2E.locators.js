@@ -47,11 +47,50 @@ export const E2ELocators = {
         page.getByRole('combobox').filter({ has: page.locator('option', { hasText: optionLabel }) }),
     trendChartLoading: (page, loadingText) => page.getByText(loadingText, { exact: true }),
 
-    // NEW: Recently Completed Assessments card = innermost container holding its heading AND its "view all" button
+    // Recently Completed Assessments card = innermost container holding its heading AND its "view all" button
     recentCompletedCard: (page, title, viewAllText) =>
         page.locator('div')
             .filter({ has: page.getByRole('heading', { name: title, exact: true }) })
             .filter({ has: page.getByRole('button', { name: viewAllText }) })
             .last(),
-    recentCompletedTitle: (card, title) => card.getByRole('heading', { name: title, exact: true })
+    recentCompletedTitle: (card, title) => card.getByRole('heading', { name: title, exact: true }),
+
+    //"View all completed assessments →" button inside the card (name matches as a substring, so the arrow is covered)
+    recentCompletedViewAll: (card, viewAllText) => card.getByRole('button', { name: viewAllText }),
+
+    // Assessments page
+    assessmentsHeading: (page, headingText) => page.getByText(headingText, { exact: true }).first(),
+    assessmentsLoading: (page, loadingText) => page.getByText(loadingText, { exact: true }),
+    assessmentsCount: (page, countPattern) => page.getByText(new RegExp(countPattern)).first(),
+  //---------------------------
+  //Assessment locaters
+  //----------------------------
+  
+    assessmentsPageTitle: (page, title) => page.getByRole('heading', { name: title, exact: true }),
+        // Assessments page - Show / Hide Filters
+    // One button whose name swaps between "Show Filters" and "Hide Filters"
+    filterToggle: (page, buttonName) => page.getByRole('button', { name: buttonName, exact: true }),
+    filterPanelTitle: (page, title) => page.getByText(title, { exact: true }),
+    // Panel = innermost container holding the panel title AND its "Reset Filters" button
+    filterPanel: (page, title, resetText) =>
+        page.locator('div')
+            .filter({ has: page.getByText(title, { exact: true }) })
+            .filter({ has: page.getByRole('button', { name: resetText, exact: true }) })
+            .last(),
+    filterPanelControl: (panel, label) => panel.getByText(label, { exact: true }).first(),
+    filterPanelReset: (panel, resetText) => panel.getByRole('button', { name: resetText, exact: true }),
+   // Filter controls are found from their visible label
+
+filterSelect: (panel, label) => panel.getByRole('combobox', { name: label, exact: true }),
+filterDateInput: (panel, label) => panel.getByRole('textbox', { name: label, exact: true }),
+assessmentRows: (page) => page.locator('tbody tr'),
+noResultsMessage: (page, text) => page.getByText(text, { exact: true }),
+bottomCount: (page, pattern) => page.getByText(new RegExp(pattern)),
+// ---------- Assessments page: search box and pagination ----------
+searchBox: (page, name) => page.getByRole('textbox', { name, exact: true }),
+searchClear: (page, text) => page.getByRole('button', { name: text, exact: true }),   // exact: does not match "Clear Filters"
+paginationButton: (page, navName, number) =>
+page.getByRole('navigation', { name: navName }).getByRole('button', { name: String(number), exact: true }),
+       // "Clear Filters" button at the top of the page (exact name, so it never matches the search box's "Clear")
+    clearAllFilters: (page, text) => page.getByRole('button', { name: text, exact: true }),
 }
