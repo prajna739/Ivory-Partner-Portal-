@@ -1606,5 +1606,448 @@ async verifyAssessmentsPageTitle(title, timeout) {
 
     console.log(`"${fl.clearAllButton}": type, status, dates and search cleared, total back to ${expectedTotal}`);
   }
-  
+   // ---------- NEW: assessment table (headers, rows per page, phone format, dates) ----------
+
+  async #tableColumn(tb, name) {
+    const headers = (await this.page.locator('thead th').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim().toLowerCase());
+    const idx = headers.findIndex((t) => t.startsWith(name.toLowerCase()));
+    expect(idx, `Column "${name}" should exist in the table header`).toBeGreaterThanOrEqual(0);
+    return idx;
+  }
+
+  // 1. Column headers
+  async verifyTableHeaders(ap, tb) {
+    expect(tb, 'assessmentTable is missing in E2EData.json').toBeDefined();
+    await expect(E2ELocators.assessmentRows(this.page).first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+    const headers = (await this.page.locator('thead th').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim().toLowerCase());
+    expect(headers.length, 'Number of column headers').toBe(tb.headers.length);
+    tb.headers.forEach((name, i) => {
+      // "Dates" also carries sort buttons (C / U), so match on the start of the header text
+      expect.soft(headers[i], `Column ${i + 1} header should be "${name}"`).toMatch(new RegExp(`^${name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    });
+    console.log(`Table headers: ${headers.join(' | ')}`);
+  }
+
+  // 2. Rows per page
+  async verifyRowsPerPage(ap, tb) {
+    const total = await this.#topTotal(ap);
+    const expected = Math.min(tb.rowsPerPage, total);
+    await expect(E2ELocators.assessmentRows(this.page), `Rows on page 1 (total ${total})`).toHaveCount(expected);
+    console.log(`Rows on page 1: ${expected} (limit ${tb.rowsPerPage}, total ${total})`);
+  }
+
+  // 3. Phone format, 4. both dates - checked on every row of the page
+  async verifyPhoneAndDates(tb) {
+    const rows = E2ELocators.assessmentRows(this.page);
+    const count = await rows.count();
+    const userIdx = await this.#tableColumn(tb, tb.userColumn);
+    const datesIdx = await this.#tableColumn(tb, tb.datesColumn);
+    const phoneRe = new RegExp(tb.phonePattern);
+
+    for (let i = 0; i < count; i++) {
+      const cells = rows.nth(i).locator('td');
+      const userText = (await cells.nth(userIdx).innerText()).replace(/\s+/g, ' ').trim();
+      const datesText = (await cells.nth(datesIdx).innerText()).replace(/\s+/g, ' ').trim();
+
+      // phone number
+      expect.soft(userText, `Row ${i + 1}: phone number format (${userText})`).toMatch(phoneRe);
+
+      // assigned + expiry dates
+      const found = [];
+      for (const d of tb.dates) {
+        const m = datesText.match(new RegExp(d.pattern));
+        expect.soft(m, `Row ${i + 1}: ${d.label} should be displayed (${datesText})`).not.toBeNull();
+        found.push(m ? new Date(m[1]) : null);
+      }
+      if (tb.expiryNotBeforeAssigned && found.length === 2 && found[0] && found[1]) {
+        expect.soft(found[1].getTime(), `Row ${i + 1}: ${tb.dates[1].label} should not be before ${tb.dates[0].label}`).toBeGreaterThanOrEqual(found[0].getTime());
+      }
+    }
+    console.log(`Phone format and both dates verified on ${count} rows`);
+  }
+    // ---------- NEW: default sort order (Latest first) ----------
+
+  // Run on a freshly loaded Assessments page, before any filter, search or sort click
+  async verifyDefaultSortOrder(ap, tb) {
+    const so = tb.defaultSort;
+    expect(so, 'assessmentTable.defaultSort is missing in E2EData.json').toBeDefined();
+    const rows = E2ELocators.assessmentRows(this.page);
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+
+    const datesIdx = await this.#tableColumn(tb, tb.datesColumn);
+    const cfg = tb.dates[so.dateIndex];
+    const count = await rows.count();
+    const times = [];
+    for (let i = 0; i < count; i++) {
+      const text = (await rows.nth(i).locator('td').nth(datesIdx).innerText()).replace(/\s+/g, ' ').trim();
+      const m = text.match(new RegExp(cfg.pattern));
+      expect(m, `Row ${i + 1}: ${cfg.label} should be displayed (${text})`).not.toBeNull();
+      times.push(new Date(m[1]).getTime());
+    }
+    expect(count, 'At least 2 rows are needed to verify the sort order').toBeGreaterThan(1);
+
+    const expected = [...times].sort((a, b) => (so.order === 'desc' ? b - a : a - b));
+    const shown = times.map((t) => new Date(t).toDateString());
+    expect.soft(times, `Default sort "${so.label}": ${cfg.label} should be ${so.order === 'desc' ? 'newest' : 'oldest'} first. Shown: ${shown.join(', ')}`).toEqual(expected);
+    console.log(`Default sort "${so.label}" (${cfg.label}): ${shown.join(' > ')}`);
+  } 
+    // ---------- NEW: Dates column sort arrows (C / U), ascending and descending ----------
+
+  async #pageDates(tb, dateIndex) {
+    const rows = E2ELocators.assessmentRows(this.page);
+    const datesIdx = await this.#tableColumn(tb, tb.datesColumn);
+    const cfg = tb.dates[dateIndex];
+    const count = await rows.count();
+    const times = [];
+    for (let i = 0; i < count; i++) {
+      const text = (await rows.nth(i).locator('td').nth(datesIdx).innerText()).replace(/\s+/g, ' ').trim();
+      const m = text.match(new RegExp(cfg.pattern));
+      expect(m, `Row ${i + 1}: ${cfg.label} should be displayed (${text})`).not.toBeNull();
+      times.push(new Date(m[1]).getTime());
+    }
+    return times;
+  }
+
+  #direction(times) {
+    const asc = times.every((t, i) => i === 0 || t >= times[i - 1]);
+    const desc = times.every((t, i) => i === 0 || t <= times[i - 1]);
+    if (asc && desc) return 'flat';
+    return asc ? 'asc' : desc ? 'desc' : 'unsorted';
+  }
+
+  async verifyDatesSort(ap, tb) {
+    const st = tb.sortToggle;
+    expect(st, 'assessmentTable.sortToggle is missing in E2EData.json').toBeDefined();
+    const datesTh = this.page.locator('thead th').filter({ hasText: new RegExp(`^\\s*${tb.datesColumn}`, 'i') });
+    await expect(E2ELocators.assessmentRows(this.page).first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+
+    for (const b of st.buttons) {
+      const cfg = tb.dates[b.dateIndex];
+      const pattern = new RegExp(st.labelPattern.replace('{label}', b.label));
+      const button = datesTh.locator('button, span, div, a').filter({ hasText: pattern }).first();
+      await expect(button, `Sort arrow "${b.label}" in the ${tb.datesColumn} header`).toBeVisible();
+
+      const dirs = [];
+      for (let n = 1; n <= st.clicks; n++) {
+        await button.click();
+        await this.page.waitForTimeout(st.settleMs);
+        const times = await this.#pageDates(tb, b.dateIndex);
+        const dir = this.#direction(times);
+        const shown = times.map((t) => new Date(t).toDateString()).join(', ');
+        console.log(`Sort ${b.label} (${cfg.label}) click ${n}: ${dir} -> ${shown}`);
+        expect.soft(['asc', 'desc'], `Sort ${b.label} click ${n}: ${cfg.label} should be sorted ascending or descending. Shown: ${shown}`).toContain(dir);
+        if (n > 1) expect.soft(dir, `Sort ${b.label} click ${n}: the order should flip after clicking again (previous: ${dirs[n - 2]})`).not.toBe(dirs[n - 2]);
+        dirs.push(dir);
+      }
+      expect.soft(new Set(dirs), `Sort ${b.label}: both ascending and descending should work (got ${dirs.join(', ')})`).toEqual(new Set(['asc', 'desc']));
+    }
+  }
+    // ---------- NEW: hover the three dots (row actions) ----------
+
+  // The row action button, or its "already used" twin (ra.alternatives), e.g. "Notify User" / "User Notified"
+  #actionButton(row, ra, name) {
+    const btn = row.getByRole('button', { name });
+    const alt = ra.alternatives && ra.alternatives[name];
+    return alt ? btn.or(row.getByRole('button', { name: alt })) : btn;
+  }
+
+  async verifyRowActionsOnHover(ap, tb) {
+    const ra = tb.rowActions;
+    expect(ra, 'assessmentTable.rowActions is missing in E2EData.json').toBeDefined();
+    const rows = E2ELocators.assessmentRows(this.page);
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+    const actionsIdx = await this.#tableColumn(tb, ra.actionsColumn);
+    const count = Math.min(ra.rowsToCheck, await rows.count());
+
+    for (let i = 0; i < count; i++) {
+      const row = rows.nth(i);
+      const dots = row.locator('td').nth(actionsIdx).getByRole('button').first();
+      const label = `Row ${i + 1}`;
+
+      // before hover the action buttons are not shown
+      for (const name of ra.buttons) {
+        await expect.soft(this.#actionButton(row, ra, name), `${label}: "${name}" should be hidden before hover`).toBeHidden();
+      }
+
+      // hover the three dots
+      await dots.scrollIntoViewIfNeeded();
+      await dots.hover();
+      await this.page.waitForTimeout(ra.settleMs);
+
+      // after hover all the action buttons are shown
+      for (const name of ra.buttons) {
+        const btn = this.#actionButton(row, ra, name);
+        await expect(btn.first(), `${label}: "${name}" should be shown after hovering the three dots`).toBeVisible();
+        // a button that has already been used (e.g. "Notify User" -> "User Notified") is shown disabled, which is expected
+        const usedAlready = ra.alternatives && ra.alternatives[name] && (await row.getByRole('button', { name }).count()) === 0;
+        if (usedAlready) console.log(`${label}: "${name}" is shown as "${ra.alternatives[name]}" (already used)`);
+        else await expect.soft(btn.first(), `${label}: "${name}" should be enabled`).toBeEnabled();
+      }
+      console.log(`${label}: after hover -> ${ra.buttons.join(', ')}`);
+
+      // moving the mouse away hides them again
+      await this.page.mouse.move(0, 0);
+      await this.page.waitForTimeout(ra.settleMs);
+      for (const name of ra.buttons) {
+        await expect.soft(this.#actionButton(row, ra, name), `${label}: "${name}" should be hidden after the mouse leaves`).toBeHidden();
+      }
+    }
+  }
+    // ---------- NEW: Notes flow (hover three dots -> Notes -> add note -> edit note) ----------
+
+  #pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  #dayKey(d) {
+    return `${d.getFullYear()}-${this.#pad2(d.getMonth() + 1)}-${this.#pad2(d.getDate())}`;
+  }
+
+  // Notes page date-time -> Date, whatever the browser locale shows (accepted formats come from the data file)
+  #parseStamp(nf, text) {
+    for (const f of nf.dateTimeFormats) {
+      const m = String(text).trim().match(new RegExp(f.pattern, 'i'));
+      if (!m) continue;
+      const day = f.order === 'mdy' ? +m[2] : +m[1];
+      const month = f.order === 'mdy' ? +m[1] : +m[2];
+      let hour = +m[4];
+      if (m[7]) hour = (hour % 12) + (m[7].toUpperCase() === 'PM' ? 12 : 0);
+      return new Date(+m[3], month - 1, day, hour, +m[5], +m[6]);
+    }
+    return null;
+  }
+
+  // 1-2. Hover the three dots of an "Assigned" row and click Notes
+  async hoverAndOpenNotes(ap, tb, nf) {
+    expect(nf, 'assessmentNotes is missing in E2EData.json').toBeDefined();
+    const rows = E2ELocators.assessmentRows(this.page);
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+
+    const userIdx = await this.#tableColumn(tb, tb.userColumn);
+    const typeIdx = await this.#tableColumn(tb, nf.typeColumn);
+    const statusIdx = await this.#tableColumn(tb, nf.statusColumn);
+    const datesIdx = await this.#tableColumn(tb, tb.datesColumn);
+    const actionsIdx = await this.#tableColumn(tb, tb.rowActions.actionsColumn);
+
+    const count = await rows.count();
+    let chosen = -1;
+    let info = {};
+    for (let i = 0; i < count; i++) {
+      const cells = rows.nth(i).locator('td');
+      const status = (await cells.nth(statusIdx).innerText()).trim();
+      const type = (await cells.nth(typeIdx).innerText()).replace(/\s+/g, ' ').trim();
+      if (status.toLowerCase() === nf.status.toLowerCase() && type) {
+        const user = (await cells.nth(userIdx).innerText()).split('\n')[0].trim();
+        const datesText = (await cells.nth(datesIdx).innerText()).replace(/\s+/g, ' ').trim();
+        const assigned = datesText.match(new RegExp(tb.dates[0].pattern));
+        const updated = datesText.match(new RegExp(tb.dates[1].pattern));
+        info = {
+          user,
+          type,
+          assignedDay: assigned ? this.#dayKey(new Date(assigned[1])) : '',
+          updatedDay: updated ? this.#dayKey(new Date(updated[1])) : '',
+        };
+        chosen = i;
+        break;
+      }
+    }
+    expect(chosen, `A row with status "${nf.status}" and an assessment type should be on page 1`).toBeGreaterThanOrEqual(0);
+    console.log(`Notes row ${chosen + 1}: ${info.user} | ${info.type} | ${info.assignedDay} | ${info.updatedDay}`);
+
+    const row = rows.nth(chosen);
+    await row.locator('td').nth(actionsIdx).getByRole('button').first().hover();
+    const notesBtn = row.getByRole('button', { name: nf.notesButton });
+    await expect(notesBtn.first(), `"${nf.notesButton}" button after hovering the three dots`).toBeVisible();
+    await notesBtn.first().click();
+    await expect(E2ELocators.notesPageText(this.page, nf.pageHeading), `"${nf.pageHeading}" page`).toBeVisible({ timeout: ap.loadTimeoutMs });
+    return info;
+  }
+
+  // 3. Account details on the Notes page
+  async verifyNotesAccountDetails(nf, info) {
+    const L = nf.detailLabels;
+    await expect(this.page.getByText(nf.backLink), `"${nf.backLink}" link`).toBeVisible();
+    await expect(E2ELocators.notesPageText(this.page, nf.detailsTitle), `"${nf.detailsTitle}" section`).toBeVisible();
+    await expect.soft(this.page.getByText(new RegExp(`^${nf.status}$`, 'i')).first(), `Status badge "${nf.status}"`).toBeVisible();
+
+    const read = async (label) => {
+      const row = E2ELocators.noteDetailRow(this.page, label);
+      await expect(row, `Detail "${label}" should be displayed`).toBeVisible();
+      return (await row.innerText()).replace(label, '').replace(/\s+/g, ' ').trim();
+    };
+    const user = await read(L.user);
+    const assessment = await read(L.assessment);
+    const assigned = await read(L.assigned);
+    const updated = await read(L.updated);
+    console.log(`Notes details -> ${L.user}: ${user} | ${L.assessment}: ${assessment} | ${L.assigned}: ${assigned} | ${L.updated}: ${updated}`);
+
+    expect.soft(user, `${L.user} should match the selected row`).toBe(info.user);
+    expect.soft(assessment, `${L.assessment} should match the selected row`).toBe(info.type);
+    for (const [label, value, day] of [[L.assigned, assigned, info.assignedDay], [L.updated, updated, info.updatedDay]]) {
+      const parsed = this.#parseStamp(nf, value);
+      expect.soft(parsed, `${label} "${value}" should match one of the expected date-time formats`).not.toBeNull();
+      if (parsed && day) expect.soft(this.#dayKey(parsed), `${label} (${value}) should be on the same day as the row (${day})`).toBe(day);
+    }
+  }
+
+  #noteMeta(nf, text) {
+    // The Created / Updated parts can sit on one line or on several, so flatten the whitespace first
+    const flat = String(text).replace(/\s+/g, ' ');
+    const esc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const stops = [nf.createdLabel, nf.updatedLabel, nf.editLink].map(esc).join('|');
+    // "<label> <date and time> by <name>", where the name ends at the next label, the Edit link or the end
+    const grab = (label) => {
+      const m = flat.match(new RegExp(`${esc(label)}\\s*(.+?)\\s*by\\s+(.+?)(?=\\s*(?:${stops})(?:\\s|$)|$)`));
+      return m ? { at: m[1].trim(), by: m[2].trim() } : null;
+    };
+    const created = grab(nf.createdLabel);
+    const updated = grab(nf.updatedLabel);
+    return {
+      created: created ? created.at : null,
+      createdBy: created ? created.by : null,
+      updated: updated ? updated.at : null,
+      updatedBy: updated ? updated.by : null,
+      text: flat,
+    };
+  }
+
+  // 4. Add a note
+  async addNote(nf) {
+    const text = `${nf.noteText} ${Date.now()}`;   // unique, so this run's note is always found
+    await expect(E2ELocators.notesPageText(this.page, nf.notesTitle), `"${nf.notesTitle}" section`).toBeVisible();
+    await expect(E2ELocators.notesPageText(this.page, nf.addTitle), `"${nf.addTitle}" heading`).toBeVisible();
+    const box = E2ELocators.noteTextBox(this.page, nf.notePlaceholder);
+    const addBtn = this.page.getByRole('button', { name: nf.addButton, exact: true });
+    await box.scrollIntoViewIfNeeded();
+    await expect.soft(addBtn, `"${nf.addButton}" should be disabled while the note is empty`).toBeDisabled();
+    await box.fill(text);
+    await expect(addBtn, `"${nf.addButton}" should be enabled after typing`).toBeEnabled();
+    await addBtn.click();
+
+    const card = E2ELocators.noteCard(this.page, text);
+    await expect(card, `Note "${text}" should be listed`).toBeVisible();
+    await expect(card.getByText(nf.createdLabel), `New note should show "${nf.createdLabel}" once it is saved`).toBeVisible();
+    await expect.soft(box, 'Add-note box is cleared after adding').toHaveValue('');
+
+    const meta = this.#noteMeta(nf, await card.innerText());
+    expect(meta.created, `New note should show "${nf.createdLabel}" date and time. Card text: "${meta.text}"`).not.toBeNull();
+    expect.soft(this.#parseStamp(nf, meta.created), `"${nf.createdLabel}" ${meta.created} should match one of the expected date-time formats`).not.toBeNull();
+    expect.soft(meta.createdBy, `New note should show who created it`).toBeTruthy();
+    expect.soft(meta.updated, `New note should not show "${nf.updatedLabel}" before editing`).toBeNull();
+    console.log(`Note added: "${text}" -> ${nf.createdLabel} ${meta.created} by ${meta.createdBy}`);
+    return { text, created: meta.created, createdBy: meta.createdBy };
+  }
+
+  // 5-6. Edit the note, save, and verify the created / updated dates and names
+  async editNoteAndVerify(nf, added) {
+    const card = E2ELocators.noteCard(this.page, added.text);
+    await card.getByText(nf.editLink, { exact: true }).click();
+
+    const editBox = this.page.locator('textarea').first();      // the edit box sits above the "Add a new note" box
+    await expect(editBox, 'Edit box shows the current note').toHaveValue(added.text);
+    const saveBtn = this.page.getByRole('button', { name: nf.saveButton, exact: true });
+    await expect.soft(this.page.getByRole('button', { name: nf.cancelButton, exact: true }), `"${nf.cancelButton}" button`).toBeVisible();
+    await expect(saveBtn, `"${nf.saveButton}" button`).toBeVisible();
+
+    const newText = `${nf.editedText} ${added.text.split(' ').pop()}`;
+    await editBox.fill(newText);
+    await saveBtn.click();
+
+    const edited = E2ELocators.noteCard(this.page, newText);
+    await expect(edited, `Edited note "${newText}" should be listed`).toBeVisible();
+    // the card matches while the button still says "Saving..."; wait until the saved note shows its Updated line
+    await expect(edited.getByText(nf.updatedLabel), `Edited note should show "${nf.updatedLabel}" once it is saved`).toBeVisible();
+    await expect.soft(E2ELocators.noteCard(this.page, added.text), 'Old note text is gone').toHaveCount(0);
+
+    const meta = this.#noteMeta(nf, await edited.innerText());
+    expect.soft(meta.created, `${nf.createdLabel} date should not change after the edit`).toBe(added.created);
+    expect.soft(meta.createdBy, `"${nf.createdLabel}" by-name`).toBeTruthy();
+    expect.soft(meta.updatedBy, `"${nf.updatedLabel}" by-name`).toBeTruthy();
+    if (nf.byName) {
+      expect.soft((meta.createdBy || '').toLowerCase(), `${nf.createdLabel} by-name`).toBe(nf.byName.toLowerCase());
+      expect.soft((meta.updatedBy || '').toLowerCase(), `${nf.updatedLabel} by-name`).toBe(nf.byName.toLowerCase());
+    }
+    const createdAt = this.#parseStamp(nf, meta.created);
+    const updatedAt = this.#parseStamp(nf, meta.updated);
+    expect.soft(updatedAt, `${nf.updatedLabel} "${meta.updated}" should match one of the expected date-time formats`).not.toBeNull();
+    if (createdAt && updatedAt) expect.soft(updatedAt.getTime(), `${nf.updatedLabel} should not be before ${nf.createdLabel}`).toBeGreaterThanOrEqual(createdAt.getTime());
+    console.log(`Note edited: "${newText}" -> ${nf.createdLabel} ${meta.created} by ${meta.createdBy} | ${nf.updatedLabel} ${meta.updated} by ${meta.updatedBy}`);
+  }
+
+  // back to the Assessments list
+  async backToAssessments(ap, nf) {
+    await this.page.getByText(nf.backLink).click();
+    await this.verifyAssessmentsPageTitle(ap.pageTitle, ap.loadTimeoutMs);
+  }
+
+  // ---------- NEW: Notify User (enabled -> success pop-up, disabled -> "send next reminder tomorrow" message) ----------
+
+  // Move the mouse away first so the row is collapsed, then hover its three dots
+  async #hoverRowActions(row, actionsIdx, settleMs) {
+    await this.page.mouse.move(0, 0);
+    await this.page.waitForTimeout(settleMs);
+    const dots = row.locator('td').nth(actionsIdx).getByRole('button').first();
+    await dots.scrollIntoViewIfNeeded();
+    await dots.hover();
+    await this.page.waitForTimeout(settleMs);
+  }
+
+  // Disabled "User Notified" button: hovering it explains when the next reminder can be sent
+  async #verifyNotifiedTooltip(label, disabledBtn, nu) {
+    await expect(disabledBtn.first(), `${label}: "${nu.disabledName}" should be disabled`).toBeDisabled();
+    await disabledBtn.first().hover({ force: true });
+    await expect(this.page.getByText(nu.disabledTooltip, { exact: true }).first(), `${label}: message "${nu.disabledTooltip}" should be shown`).toBeVisible();
+  }
+
+  async verifyNotifyUser(ap, tb, nu) {
+    expect(nu, 'notifyUser is missing in E2EData.json').toBeDefined();
+    const rows = E2ELocators.assessmentRows(this.page);
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+    const statusIdx = await this.#tableColumn(tb, nu.statusColumn);
+    const actionsIdx = await this.#tableColumn(tb, tb.rowActions.actionsColumn);
+
+    // the first rows on this page that have the wanted status
+    const wanted = [];
+    const count = await rows.count();
+    for (let i = 0; i < count && wanted.length < nu.rowsToCheck; i++) {
+      const status = (await rows.nth(i).locator('td').nth(statusIdx).innerText()).trim();
+      if (status.toLowerCase() === nu.status.toLowerCase()) wanted.push(i);
+    }
+    expect(wanted.length, `Rows with status "${nu.status}" on page 1`).toBeGreaterThan(0);
+
+    let sent = 0;
+    let alreadyNotified = 0;
+    for (const i of wanted) {
+      const row = rows.nth(i);
+      const label = `Row ${i + 1}`;
+      const enabledBtn = row.getByRole('button', { name: nu.enabledName });
+      const disabledBtn = row.getByRole('button', { name: nu.disabledName });
+
+      // 1. hover the three dots
+      await this.#hoverRowActions(row, actionsIdx, nu.settleMs);
+      await expect(enabledBtn.or(disabledBtn).first(), `${label}: a notify button should be shown after hovering the three dots`).toBeVisible();
+
+      if ((await enabledBtn.count()) > 0) {
+        // 2. enabled: click it and the success pop-up is displayed
+        await expect(enabledBtn.first(), `${label}: "${nu.enabledName}" should be enabled`).toBeEnabled();
+        await enabledBtn.first().click();
+        await expect(this.page.getByText(nu.successTitle, { exact: true }).first(), `${label}: "${nu.successTitle}" pop-up`).toBeVisible({ timeout: nu.toastTimeoutMs });
+        await expect(this.page.getByText(nu.successMessage).first(), `${label}: pop-up message "${nu.successMessage}"`).toBeVisible({ timeout: nu.toastTimeoutMs });
+        console.log(`${label}: "${nu.enabledName}" clicked -> ${nu.successTitle}: ${nu.successMessage}`);
+        sent++;
+
+        // afterwards the button is disabled and explains the next reminder is tomorrow
+        await this.#hoverRowActions(row, actionsIdx, nu.settleMs);
+        await expect(disabledBtn.first(), `${label}: button should read "${nu.disabledName}" after the notification is sent`).toBeVisible();
+        await this.#verifyNotifiedTooltip(label, disabledBtn, nu);
+      } else {
+        // 3. disabled: the message says the next reminder can be sent tomorrow
+        await this.#verifyNotifiedTooltip(label, disabledBtn, nu);
+        console.log(`${label}: "${nu.disabledName}" is disabled -> "${nu.disabledTooltip}"`);
+        alreadyNotified++;
+      }
+    }
+    console.log(`Notify User: ${sent} notification(s) sent, ${alreadyNotified} already notified, ${wanted.length} row(s) checked`);
+  }
+
 }

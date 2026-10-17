@@ -175,6 +175,25 @@ test.describe('Ivory-PartnerLogin', () => {
     await nav.verifyFilterPanelDisplayed(fp);
     await nav.verifyTypeStatusSearchAndDate(ap, fp, sb, fl);   
     await nav.clickClearFilters(ap, fp, sb, fl, baseTotal);    
-    await nav.clickResetFilters(ap, fp, baseTotal);            
+    await nav.clickResetFilters(ap, fp, baseTotal);  
+        // ---- assessment table: headers, rows per page, phone format, dates ----
+    const tb = e2eData.assessmentTable;
+    await nav.verifyTableHeaders(ap, tb);
+    await nav.verifyRowsPerPage(ap, tb);
+    await nav.verifyPhoneAndDates(tb);  
+        // ---- default sort order: Latest first (fresh page, nothing filtered or sorted yet) ----
+    await nav.verifyDefaultSortOrder(ap, e2eData.assessmentTable);        
+    await nav.verifyDatesSort(ap, tb); 
+    await nav.verifyRowActionsOnHover(ap, tb);      
+        // ---- Notes: hover three dots -> Notes -> details -> add note -> edit note -> back ----
+    const nf = e2eData.assessmentNotes;
+    const rowInfo = await nav.hoverAndOpenNotes(ap, tb, nf);
+    await nav.verifyNotesAccountDetails(nf, rowInfo);
+    const addedNote = await nav.addNote(nf);
+    await nav.editNoteAndVerify(nf, addedNote);
+    await nav.backToAssessments(ap, nf);   
+       // ---- Notify User: enabled -> success pop-up; disabled -> "send next reminder tomorrow" message ----
+    const nu = e2eData.notifyUser;
+    await nav.verifyNotifyUser(ap, tb, nu);                        
   });
 });

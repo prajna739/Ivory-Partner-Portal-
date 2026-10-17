@@ -92,5 +92,10 @@ searchClear: (page, text) => page.getByRole('button', { name: text, exact: true 
 paginationButton: (page, navName, number) =>
 page.getByRole('navigation', { name: navName }).getByRole('button', { name: String(number), exact: true }),
        // "Clear Filters" button at the top of the page (exact name, so it never matches the search box's "Clear")
-    clearAllFilters: (page, text) => page.getByRole('button', { name: text, exact: true }),
+clearAllFilters: (page, text) => page.getByRole('button', { name: text, exact: true }),
+    // Notes page
+    notesPageText: (page, text) => page.getByText(text, { exact: true }),
+    noteDetailRow: (page, label) => page.locator('div').filter({ has: page.getByText(label, { exact: true }) }).last(),
+    noteTextBox: (page, placeholder) => page.getByPlaceholder(placeholder),
+        noteCard: (page, text) => page.locator('p').filter({ hasText: new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }).locator('xpath=..'),
 }

@@ -11,23 +11,61 @@
   },
   "trendChart": {
     "title": "Monthly Assessment Trends",
-    "legend": ["Assigned", "Completed"],
+    "legend": [
+      "Assigned",
+      "Completed"
+    ],
     "legendColors": {
-      "Assigned": { "name": "blue", "hueMin": 190, "hueMax": 260 },
-      "Completed": { "name": "orange", "hueMin": 15, "hueMax": 50 }
+      "Assigned": {
+        "name": "blue",
+        "hueMin": 190,
+        "hueMax": 260
+      },
+      "Completed": {
+        "name": "orange",
+        "hueMin": 15,
+        "hueMax": 50
+      }
     },
-    "axisLabelPattern": { "x": "\\d{4}-\\d{2}", "y": "\\d+" },
-    "tooltip": { "monthPattern": "\\d{4}-\\d{2}", "hoverYRatio": 0.4, "stepPx": 5, "waitMs": 500 },
+    "axisLabelPattern": {
+      "x": "\\d{4}-\\d{2}",
+      "y": "\\d+"
+    },
+    "tooltip": {
+      "monthPattern": "\\d{4}-\\d{2}",
+      "hoverYRatio": 0.4,
+      "stepPx": 5,
+      "waitMs": 500
+    },
     "periodDropdown": {
       "loadingText": "Loading chart data...",
       "periods": [
-        { "option": "Daily Trends",   "title": "Daily Assessment Trends",   "xPattern": "\\d{4}-\\d{2}-\\d{2}" },
-        { "option": "Weekly Trends",  "title": "Weekly Assessment Trends",  "xPattern": "\\d{4}-\\d{2}" },
-        { "option": "Monthly Trends", "title": "Monthly Assessment Trends", "xPattern": "\\d{4}-\\d{2}" },
-        { "option": "Yearly Trends",  "title": "Yearly Assessment Trends",  "xPattern": "\\d{4}" }
+        {
+          "option": "Daily Trends",
+          "title": "Daily Assessment Trends",
+          "xPattern": "\\d{4}-\\d{2}-\\d{2}"
+        },
+        {
+          "option": "Weekly Trends",
+          "title": "Weekly Assessment Trends",
+          "xPattern": "\\d{4}-\\d{2}"
+        },
+        {
+          "option": "Monthly Trends",
+          "title": "Monthly Assessment Trends",
+          "xPattern": "\\d{4}-\\d{2}"
+        },
+        {
+          "option": "Yearly Trends",
+          "title": "Yearly Assessment Trends",
+          "xPattern": "\\d{4}"
+        }
       ]
     },
-    "legendToggle": { "hueTolerance": 25, "dimDelta": 0.05 }
+    "legendToggle": {
+      "hueTolerance": 25,
+      "dimDelta": 0.05
+    }
   },
   "recentCompleted": {
     "title": "Recently Completed Assessments",
@@ -59,7 +97,12 @@
     "showButton": "Show Filters",
     "hideButton": "Hide Filters",
     "panelTitle": "Filter Assessments",
-    "controls": ["Assessment Type", "Status", "Start Date", "End Date"],
+    "controls": [
+      "Assessment Type",
+      "Status",
+      "Start Date",
+      "End Date"
+    ],
     "resetButton": "Reset Filters",
     "typeLabel": "Assessment Type",
     "statusLabel": "Status",
@@ -67,25 +110,63 @@
     "endDateLabel": "End Date",
     "defaultType": "All Types",
     "defaultStatus": "All Statuses",
-    "statusesToCheck": ["Assigned", "In-Process", "Completed"],
+    "statusesToCheck": [
+      "Assigned",
+      "In-Process",
+      "Completed"
+    ],
     "specificTypeIndex": 1,
     "noResultsMessage": "No assessments found for the selected criteria.",
     "bottomCountPattern": "Showing \\d+ to \\d+ of \\d+ results",
     "settleMs": 700,
-    "dateFilter": { "startOffsetDays": 10, "endOffsetDays": 0 },
-    "combinedFilter": { "typeIndex": 3, "status": "Assigned", "startOffsetDays": 30, "endOffsetDays": 0 }
+    "dateFilter": {
+      "startOffsetDays": 10,
+      "endOffsetDays": 0
+    },
+    "combinedFilter": {
+      "typeIndex": 3,
+      "status": "Assigned",
+      "startOffsetDays": 30,
+      "endOffsetDays": 0
+    }
   },
   "assessmentSearch": {
     "boxName": "Search name, phone, email or assessment type",
     "clearButton": "Clear",
     "settleMs": 600,
     "searches": [
-      { "label": "User name", "term": "prajna", "matchRows": true },
-      { "label": "Phone number", "term": "8310076228", "matchRows": true },
-      { "label": "Email", "term": "prajna@qaoncloud.com", "matchRows": false },
-      { "label": "Assessment name", "term": "Trail Making Test (TMT)", "matchRows": true },
-      { "label": "Case-insensitive", "term": "PRAJNA", "matchRows": true, "sameTotalAs": "User name" },
-      { "label": "No match", "term": ".......", "matchRows": false, "expectNoResults": true }
+      {
+        "label": "User name",
+        "term": "prajna",
+        "matchRows": true
+      },
+      {
+        "label": "Phone number",
+        "term": "8310076228",
+        "matchRows": true
+      },
+      {
+        "label": "Email",
+        "term": "prajna@qaoncloud.com",
+        "matchRows": false
+      },
+      {
+        "label": "Assessment name",
+        "term": "Trail Making Test (TMT)",
+        "matchRows": true
+      },
+      {
+        "label": "Case-insensitive",
+        "term": "PRAJNA",
+        "matchRows": true,
+        "sameTotalAs": "User name"
+      },
+      {
+        "label": "No match",
+        "term": ".......",
+        "matchRows": false,
+        "expectNoResults": true
+      }
     ],
     "clearTerm": "prajna",
     "paginationName": "Pagination",
@@ -99,5 +180,116 @@
     "startOffsetDays": 1,
     "endOffsetDays": -5,
     "clearAllButton": "Clear Filters"
+  },
+  "assessmentTable": {
+    "headers": [
+      "User Name",
+      "Assessment Type",
+      "Status",
+      "Dates",
+      "Actions"
+    ],
+    "userColumn": "User Name",
+    "datesColumn": "Dates",
+    "rowsPerPage": 10,
+    "phonePattern": "\\+\\d{10,15}(?!\\d)",
+    "dates": [
+      {
+        "label": "Assigned date (C)",
+        "pattern": "C:\\s*([A-Z][a-z]{2} \\d{1,2}, \\d{4})"
+      },
+      {
+        "label": "Expiry date (U)",
+        "pattern": "U:\\s*([A-Z][a-z]{2} \\d{1,2}, \\d{4})"
+      }
+    ],
+    "expiryNotBeforeAssigned": true,
+    "defaultSort": {
+      "label": "Latest first",
+      "dateIndex": 0,
+      "order": "desc"
+    },
+    "sortToggle": {
+      "labelPattern": "^\\s*{label}\\s*[^A-Za-z]*$",
+      "settleMs": 900,
+      "clicks": 2,
+      "buttons": [
+        {
+          "label": "C",
+          "dateIndex": 0
+        },
+        {
+          "label": "U",
+          "dateIndex": 1
+        }
+      ]
+    },
+    "rowActions": {
+      "actionsColumn": "Actions",
+      "buttons": [
+        "Notes",
+        "Notify User",
+        "Show Key",
+        "View History"
+      ],
+      "rowsToCheck": 2,
+      "settleMs": 400,
+      "alternatives": {
+        "Notify User": "User Notified"
+      }
+    }
+  },
+  "assessmentNotes": {
+    "status": "Assigned",
+    "typeColumn": "Assessment Type",
+    "statusColumn": "Status",
+    "notesButton": "Notes",
+    "pageHeading": "Assessment Notes",
+    "backLink": "Back to Assessments",
+    "detailsTitle": "Assessment Details",
+    "detailLabels": {
+      "user": "User",
+      "assessment": "Assessment Name",
+      "assigned": "Date Assigned",
+      "updated": "Last Updated"
+    },
+    "notesTitle": "Notes",
+    "addTitle": "Add a new note",
+    "notePlaceholder": "Type your note here...",
+    "addButton": "Add Note",
+    "editLink": "Edit",
+    "saveButton": "Save",
+    "cancelButton": "Cancel",
+    "noteText": "test",
+    "editedText": "test123",
+    "createdLabel": "Created:",
+    "updatedLabel": "Updated:",
+    "createdPattern": "Created:\\s*(.+?)\\s+by\\s+(.+?)(?=\\s+Updated:|\\s+Edit\\b|$)",
+    "updatedPattern": "Updated:\\s*(.+?)\\s+by\\s+(.+?)(?=\\s+Created:|\\s+Edit\\b|$)",
+    "byName": "Prajna",
+    "dateTimeFormats": [
+      {
+        "name": "US 12-hour",
+        "order": "mdy",
+        "pattern": "^(\\d{1,2})/(\\d{1,2})/(\\d{4}),\\s*(\\d{1,2}):(\\d{2}):(\\d{2})\\s*(AM|PM)$"
+      },
+      {
+        "name": "DD/MM 24-hour",
+        "order": "dmy",
+        "pattern": "^(\\d{1,2})/(\\d{1,2})/(\\d{4}),\\s*(\\d{1,2}):(\\d{2}):(\\d{2})$"
+      }
+    ]
+  },
+  "notifyUser": {
+    "status": "Assigned",
+    "statusColumn": "Status",
+    "rowsToCheck": 3,
+    "enabledName": "Notify User",
+    "disabledName": "User Notified",
+    "successTitle": "Success",
+    "successMessage": "Notification resent successfully!",
+    "disabledTooltip": "User already notified. Send next reminder tomorrow.",
+    "toastTimeoutMs": 8000,
+    "settleMs": 500
   }
 }
