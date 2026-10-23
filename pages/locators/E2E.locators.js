@@ -97,5 +97,73 @@ clearAllFilters: (page, text) => page.getByRole('button', { name: text, exact: t
     notesPageText: (page, text) => page.getByText(text, { exact: true }),
     noteDetailRow: (page, label) => page.locator('div').filter({ has: page.getByText(label, { exact: true }) }).last(),
     noteTextBox: (page, placeholder) => page.getByPlaceholder(placeholder),
-        noteCard: (page, text) => page.locator('p').filter({ hasText: new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }).locator('xpath=..'),
+    noteCard: (page, text) => page.locator('p').filter({ hasText: new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }).locator('xpath=..'),
+    //---------------------------------------------------
+    //user locater
+    //--------------------------------------------------------------
+    
+    usersPageTitle: (page, title) => page.getByRole('heading', { name: title, exact: true }),
+    // Users page stat card: the innermost block whose text is exactly "<label> <value>" (the value pattern comes from the data file)
+    usersCardLabel: (page, label) => page.getByText(label, { exact: true }).first(),
+    usersCard: (page, label, valuePattern) =>
+        page.locator('div')
+            .filter({ hasText: new RegExp(`^\\s*${escapeRegExp(label)}\\s*(?:${valuePattern})\\s*$`) })
+            .last(),
+        usersHeaders: (page) => page.getByRole('columnheader'),
+    usersRows: (page) => page.locator('tbody tr'),
+    usersRowCell: (row, index) => row.locator('td').nth(index),
+    usersCount: (page, pattern) => page.getByText(new RegExp(pattern)).first(),
+    userRowAction: (row, name) => row.getByRole('button', { name }).first(),
+    editUserDialog: (page, title, cancelName) =>
+        page.locator('div')
+            .filter({ has: page.getByText(title, { exact: true }) })
+            .filter({ has: page.getByRole('button', { name: cancelName, exact: true }) })
+            .last(),
+    editUserCancel: (dialog, name) => dialog.getByRole('button', { name, exact: true }),
+    // the X icon: a button named "Close", otherwise the first button in the pop-up
+    editUserClose: (dialog, name) => dialog.getByRole('button', { name }).or(dialog.locator('button').first()).first(),
+
+    backToUsers: (page, text) =>
+        page.getByRole('link', { name: text }).or(page.getByRole('button', { name: text })).first(),
+
+    // Users page: "Notes for <user>" pop-up. The X icon is the button in the same header row as the pop-up title; a note card holds the note text and its "Created:" line
+    userNotesClose: (page, title) =>
+        page.getByText(title, { exact: true }).first().locator('xpath=ancestor::*[.//button][1]').getByRole('button').first(),
+    userNoteCard: (page, text, createdLabel) =>
+        page.locator('div')
+            .filter({ has: page.getByText(text, { exact: true }) })
+            .filter({ has: page.getByText(createdLabel) })
+            .last(),
+userKeyDialog: (page, title, closeName) => page.locator('div').filter({ has: page.getByText(title, { exact: true }) }).filter({ has: page.getByRole('button', { name: closeName, exact: true }) }).last(),
+userKeyCancelIcon: (dialog, name) => dialog.getByRole('button', { name }).or(dialog.locator('button').first()).first(),
+  usersPagination: (page, name) => page.getByRole('navigation', { name }),
+  usersPageButton: (nav, name, exact) => nav.getByRole('button', { name, exact }),
+//==============================
+//product page locaters
+//===============================
+  // ---- Products ----
+  productsPageTitle: (page, name) => page.getByRole('heading', { name, exact: true }),
+  productsCount: (page, pattern) => page.getByText(new RegExp(pattern)).first(),
+  productTab: (page, label, countPattern) => page.locator('button').filter({ hasText: new RegExp(`^\\s*${label}${countPattern}\\s*$`) }).first(),
+  productCards: (page, action) => page.getByRole('button', { name: new RegExp(`^${action} for `) }),
+  productCardName: (card) => card.getByRole('heading').first(),
+  productCardBadge: (card, text) => card.getByText(text, { exact: true }),
+  productDialog: (page, name, labels) => labels.reduce((loc, l) => loc.filter({ has: page.getByText(new RegExp(`^\\s*${l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')) }), page.locator('div').filter({ has: page.getByText(name, { exact: true }) })).last(),
+  productDialogLabel: (dialog, text) => dialog.getByText(new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')).first(),
+  productContactSales: (card, name) => card.getByRole('button', { name, exact: true }),
+  productDialogClose: (dialog, name) => dialog.getByRole('button', { name }).or(dialog.locator('button').first()).first(),
+    productSearchBox: (page, name) => page.getByRole('textbox', { name }),
+  // the cross icon = the last button next to the search box (it comes after the tabs in the page)
+  productSearchClear: (box, name) => box.locator('xpath=ancestor::*[.//button][1]').getByRole('button', { name }).or(box.locator('xpath=ancestor::*[.//button][1]').getByRole('button').last()).last(),
+  productNoResults: (page, text, term) => page.getByText(new RegExp(`${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\W?${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)).first(),
+  productResetFilters: (page, name) => page.getByRole('button', { name }).or(page.getByRole('link', { name })).first(),
+//==========================================
+//profile locater
+//==========================================
+    // ---- Profile ----
+    profileMenu: (page, name) => page.getByRole('link', { name, exact: true }),
+    profilePageTitle: (page, name) => page.getByRole('heading', { name, exact: true }),
+    profileSubtitle: (page, text) => page.getByText(text, { exact: true }),
+        profileTab: (page, name) => page.getByRole('tab', { name }).or(page.getByRole('button', { name })).first(),
+    profileText: (page, text) => page.getByText(text, { exact: true }).first(),
 }

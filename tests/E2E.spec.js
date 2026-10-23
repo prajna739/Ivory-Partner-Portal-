@@ -194,6 +194,102 @@ test.describe('Ivory-PartnerLogin', () => {
     await nav.backToAssessments(ap, nf);   
        // ---- Notify User: enabled -> success pop-up; disabled -> "send next reminder tomorrow" message ----
     const nu = e2eData.notifyUser;
-    await nav.verifyNotifyUser(ap, tb, nu);                        
+    await nav.verifyNotifyUser(ap, tb, nu); 
+    const sk = e2eData.showKey;
+    await nav.verifyShowKey(ap, tb, sk); 
+    const vh = e2eData.viewHistory;
+    await nav.verifyViewHistory(ap, tb, vh);
+    const ir = e2eData.ivoryReport;
+    await nav.verifyIvoryReport(ap, fp, tb, ir);
+    const pg = e2eData.pagination;
+    await nav.verifyPagination(ap, fp, tb, pg);
+  });
+  test('User', async ({ page }) => {
+     test.setTimeout(e2eData.assessmentsPage.testTimeoutMs);
+    const user = new E2EPage(page);
+
+    // Log in first so the portal is reachable
+    await login.fillEmail(loginData.validEmail);
+    await login.fillPassword(loginData.validPassword);
+    await login.checkTermsCheckbox();
+    await login.verifySignInButtonEnabled();
+    await login.clickSignIn();
+
+    // 1. Click the Users tab
+    await user.clickUserClick();
+
+    // 2. Page title "Users" and the Users tab is highlighted
+    await user.verifyUsersPageTitle(e2eData.users.pageTitle, e2eData.users.loadTimeoutMs);
+    await user.verifyUsersTabHighlighted();
+
+    // 3. "Assign Assessment" button is visible and enabled
+    await user.verifyAssignAssessmentButton(e2eData.assignAssessmentButtonName);
+      // 4. The four stat cards, with their values printed
+    await user.verifyUserCards(e2eData.users.cards, e2eData.users.loadTimeoutMs);
+     // 5. Table: column headers, 10 rows per page, "Showing .. of .. users" counts
+    await user.verifyUserTable(e2eData.users.table, e2eData.users.loadTimeoutMs);
+  await user.verifyUserAssessmentCounts(e2eData.users.table.assessmentCounts, e2eData.users.loadTimeoutMs);
+
+    // 6. Sorting for every column
+    await user.verifyUserSorting(e2eData.users.table.sort, e2eData.users.loadTimeoutMs);
+      // 7. Hover the three dots of a user: the six action buttons are shown
+    await user.verifyUserRowActions(e2eData.users.rowActions, e2eData.users.loadTimeoutMs);
+
+    // 8. Edit User: open and close with Cancel, then open on another user and close with the X icon
+    await user.verifyEditUser(e2eData.users.rowActions, e2eData.users.loadTimeoutMs);
+      // 9. Hover a user's three dots -> View Assessments -> Assessments page -> Back to Users
+    await user.verifyUserViewAssessments(e2eData.users, e2eData.assessmentsPage, e2eData.users.loadTimeoutMs);
+        // 10. Hover a user's three dots -> View History -> Assessment History page -> Back to the Users page
+    await user.verifyUserViewHistory(e2eData.users, e2eData.viewHistory, e2eData.users.loadTimeoutMs);
+      // 11. Hover a user's three dots -> View Notes -> Add Note (Cancel, then Save) -> Show more / Show less -> created date -> close icon
+    await user.verifyUserViewNotes(e2eData.users, e2eData.assessmentNotes, e2eData.users.loadTimeoutMs);
+  await user.verifyUserShowKey(e2eData.users, e2eData.showKey, e2eData.users.loadTimeoutMs);
+  // 13. Pagination: Next -> page 2, Previous -> page 1, click a page number
+  await user.verifyUserPagination(e2eData.users, e2eData.users.loadTimeoutMs);  
+});
+  test('Product', async ({ page }) => {
+    test.setTimeout(e2eData.products.testTimeoutMs);
+
+    const product = new E2EPage(page);
+
+    // Log in first so the portal is reachable
+    await login.fillEmail(loginData.validEmail);
+    await login.fillPassword(loginData.validPassword);
+    await login.checkTermsCheckbox();
+    await login.verifySignInButtonEnabled();
+    await login.clickSignIn();
+
+    // 1. Click the Products tab
+    await product.clickProductClick();
+    await product.verifyTabIsActive(product.productClick);
+
+    // 2. Page title and the "<n> assessments available · <n> active" statement
+    await product.verifyProductsPage(e2eData.products, e2eData.products.loadTimeoutMs);
+      // 3. Tab counts, all card names, View details on an active card -> pop-up with its details and "Active for your account"
+    await product.verifyProductsCardsAndDetails(e2eData.products, e2eData.products.loadTimeoutMs);
+        // 3. Active / Available / All tabs: assessment names, and "Contact Sales" on inactive ones (only if any exist)
+    await product.verifyProductsTabFilters(e2eData.products, e2eData.products.loadTimeoutMs);
+        // 5. Search: invalid data -> "No results", Reset filters, valid data -> results, cross icon clears the search
+    await product.verifyProductsSearch(e2eData.products, e2eData.products.loadTimeoutMs);
+  });
+   test('Profile', async ({ page }) => {
+    test.setTimeout(e2eData.profile.testTimeoutMs);
+
+    const profile = new E2EPage(page);
+
+    // Log in first so the portal is reachable
+    await login.fillEmail(loginData.validEmail);
+    await login.fillPassword(loginData.validPassword);
+    await login.checkTermsCheckbox();
+    await login.verifySignInButtonEnabled();
+    await login.clickSignIn();
+
+    // 1. Click the Profile menu
+    await profile.clickProfileMenu(e2eData.profile, e2eData.profile.loadTimeoutMs);
+
+    // 2. Page title and the "View and manage your profile and workspace settings" statement
+    await profile.verifyProfileScreen(e2eData.profile, e2eData.profile.loadTimeoutMs);
+      // 3. The four tabs: displayed, "Information" selected by default, each tab loads its own content
+    await profile.verifyProfileTabs(e2eData.profile, e2eData.profile.loadTimeoutMs);
   });
 });

@@ -291,5 +291,311 @@
     "disabledTooltip": "User already notified. Send next reminder tomorrow.",
     "toastTimeoutMs": 8000,
     "settleMs": 500
+  },
+  "showKey": {
+    "status": "Assigned",
+    "statusColumn": "Status",
+    "buttonName": "Show Key",
+    "dialogTitle": "User Authentication Key",
+    "expiredMessage": "This key has expired. Please regenerate to create a new key.",
+    "expiredTag": "\\(expired\\)",
+    "infoMessage": "Info: This authentication key is stored securely and can be viewed anytime. Share it securely with the user.",
+    "keyPattern": "([A-Z0-9]{4,12})\\s*(Expired|Expires):\\s*([A-Z][a-z]{2} \\d{1,2}, \\d{4},?\\s*\\d{1,2}:\\d{2}\\s*[AP]M)",
+    "copyButton": "Copy to Clipboard",
+    "copiedMessage": "UserKey copied to clipboard!",
+    "regenerateButton": "Regenerate Key",
+    "confirmMessage": "Are you sure? This will invalidate the old key and generate a new one.",
+    "confirmButton": "Yes, Regenerate",
+    "cancelButton": "Cancel",
+    "regeneratedMessage": "UserKey regenerated successfully!",
+    "closeButton": "Close",
+    "toastTimeoutMs": 8000,
+    "settleMs": 500
+  },
+  "viewHistory": {
+    "status": "Assigned",
+    "statusColumn": "Status",
+    "buttonName": "View History",
+    "headingSuffix": "Assessment History",
+    "summaryPattern": "(\\d+) assessments? across (\\d+) types?",
+    "summaryExample": "2 assessments across 2 types",
+    "typeTabPattern": "\\s(\\d+)$",
+    "sessionsTitle": "Sessions",
+    "sessionHeaders": [
+      "Date",
+      "Status",
+      "Score",
+      "Report"
+    ],
+    "backButton": "Back",
+    "settleMs": 500
+  },
+  "ivoryReport": {
+    "navTab": "Assessments",
+    "status": "Completed",
+    "statusColumn": "Status",
+    "typeColumn": "Assessment Type",
+    "paginationName": "Pagination",
+    "pageChangeTimeoutMs": 15000,
+    "buttonName": "Ivory Report",
+    "reportUrlPattern": "\\.pdf|report",
+    "reportOpenTimeoutMs": 20000,
+    "settleMs": 500,
+    "nextButton": "Next"
+  },
+  "pagination": {
+    "navTab": "Assessments",
+    "paginationName": "Pagination",
+    "previousButton": "Previous",
+    "nextButton": "Next",
+    "jumpPage": 2
+  },
+  "users": {
+    "pageTitle": "Users",
+    "loadTimeoutMs": 15000,
+    "cards": [
+      {
+        "label": "Total Users",
+        "pattern": "\\d[\\d,]*"
+      },
+      {
+        "label": "Engaged Users",
+        "pattern": "\\d[\\d,]*"
+      },
+      {
+        "label": "Avg. Completion Rate",
+        "pattern": "\\d+(?:\\.\\d+)?%"
+      },
+      {
+        "label": "New Users (7 days)",
+        "pattern": "\\d[\\d,]*"
+      }
+    ],
+    "table": {
+      "headers": [
+        "Name",
+        "Phone/Email",
+        "Total Assessments",
+        "Completion %",
+        "Registration Date",
+        "Actions"
+      ],
+      "rowsPerPage": 10,
+      "topCountPattern": "Showing \\d+ - \\d+ of \\d+ users",
+      "bottomCountPattern": "Showing \\d+ to \\d+ of \\d+ users",
+      "assessmentCounts": {
+        "columnHeader": "Total Assessments",
+        "rowsToCheck": 5,
+        "labels": {
+          "total": "Total",
+          "assigned": "Assigned",
+          "inProgress": "In Progress",
+          "completed": "Completed"
+        }
+      },
+      "sort": {
+        "clicks": 2,
+        "settleMs": 800,
+        "ascArrows": [
+          "↑",
+          "▲"
+        ],
+        "descArrows": [
+          "↓",
+          "▼"
+        ],
+        "columns": [
+          {
+            "header": "Name",
+            "type": "text",
+            "line": "last",
+            "caseSensitive": true
+          },
+          {
+            "header": "Phone/Email",
+            "type": "text",
+            "caseSensitive": true,
+            "pattern": "\\+\\d{10,15}(?!\\d)"
+          },
+          {
+            "header": "Total Assessments",
+            "type": "number",
+            "pattern": "(\\d+)\\s*Total"
+          },
+          {
+            "header": "Completion %",
+            "type": "number",
+            "pattern": "(\\d+(?:\\.\\d+)?)\\s*%"
+          },
+          {
+            "header": "Registration Date",
+            "type": "date",
+            "pattern": "(\\d{1,2})/(\\d{1,2})/(\\d{4})",
+            "dateOrder": "mdy"
+          }
+        ]
+      }
+    },
+    "rowActions": {
+      "actionsColumn": "Actions",
+      "buttons": [
+        "Edit User",
+        "Add Assessment",
+        "View Assessments",
+        "View History",
+        "View Notes",
+        "Show Key"
+      ],
+      "settleMs": 500,
+      "hoverRow": 0,
+      "cancelRow": 0,
+      "closeRow": 1,
+      "editButton": "Edit User",
+      "editDialog": {
+        "title": "Edit User",
+        "infoLabels": [
+          "Name:",
+          "Email:",
+          "Phone:"
+        ],
+        "saveButton": "Save Changes",
+        "cancelButton": "Cancel",
+        "closeButton": "Close"
+      }
+    },
+    "viewAssessments": {
+      "row": 0,
+      "button": "View Assessments",
+      "backLink": "Back to Users"
+    },
+    "viewHistory": {
+      "row": 0,
+      "button": "View History",
+      "datePattern": "[A-Z][a-z]{2} \\d{1,2}, \\d{4}"
+    },
+    "viewNotes": {
+      "row": 0,
+      "button": "View Notes",
+      "titlePrefix": "Notes for",
+      "addButton": "Add Note",
+      "placeholder": "Add a note about this user...",
+      "cancelButton": "Cancel",
+      "saveButton": "Save Note",
+      "noteText": "test",
+      "listTitle": "General Notes",
+      "showMore": "Show more",
+      "showLess": "Show less",
+      "createdLabel": "Created:",
+      "createdPattern": "Created:\\s*(\\d{1,2}/\\d{1,2}/\\d{4},\\s*\\d{1,2}:\\d{2}:\\d{2}(?:\\s*[AP]M)?)",
+      "settleMs": 500
+    },
+    "showKey": {
+      "row": 0,
+      "button": "Show Key",
+      "iconLabel": "Close",
+      "settleMs": 500
+    },
+    "pagination": {
+      "paginationName": "Pagination",
+      "nextButton": "Next",
+      "previousButton": "Previous",
+      "jumpPage": 3,
+      "settleMs": 500
+    }
+  },
+  "products": {
+    "pageTitle": "Products",
+    "loadTimeoutMs": 15000,
+    "testTimeoutMs": 120000,
+    "countPattern": "(\\d+)\\s+assessments?\\s+available\\s*[·•\\-]\\s*(\\d+)\\s+active",
+    "tabs": [
+      "All",
+      "Active",
+      "Available"
+    ],
+    "tabCountPattern": "\\s*(\\d+)",
+    "cardAction": "View details",
+    "activeBadge": "Active",
+    "detail": {
+      "row": 0,
+      "labels": [
+        "Overview",
+        "Components",
+        "Detailed Description",
+        "Cognitive Areas"
+      ],
+      "durationPattern": "\\d+(?:\\s*-\\s*\\d+)?\\s*min",
+      "cognitiveHeaders": [
+        "Cognitive Area",
+        "Description"
+      ],
+      "activeLine": "Active for your account",
+      "durationLabel": "Time duration",
+      "nameLabel": "Assessment name",
+      "closeIcon": "Close"
+    },
+    "inactiveBadge": "Inactive",
+    "contactSales": "Contact Sales",
+    "filterSettleMs": 500,
+    "search": {
+      "boxName": "Search products",
+      "invalidTerm": "8890k",
+      "validTerm": "cantab",
+      "noResultsText": "No results for",
+      "noResultsHint": "Try a different search term.",
+      "resetLink": "Reset filters",
+      "clearIcon": "Clear",
+      "settleMs": 600
+    }
+  },
+  "profile": {
+    "menuName": "Profile",
+    "urlPattern": "/profile",
+    "pageTitle": "Profile",
+    "subtitle": "View and manage your profile and workspace settings",
+    "loadTimeoutMs": 15000,
+    "testTimeoutMs": 120000,
+    "defaultTab": "Information",
+    "selectedClassPattern": "active|selected|current",
+    "tabs": [
+      {
+        "name": "Information",
+        "heading": "User Information",
+        "contents": [
+          "User Information",
+          "Name",
+          "Email",
+          "Current Workspace",
+          "Partner Name",
+          "Partner Email",
+          "Phone Number"
+        ]
+      },
+      {
+        "name": "Preferences",
+        "heading": "Report Settings",
+        "contents": [
+          "Report Settings",
+          "Signer Name",
+          "Signer Designation",
+          "These values will be used as defaults when generating PDF reports."
+        ]
+      },
+      {
+        "name": "Assessments",
+        "heading": "Assessment Reminders",
+        "contents": [
+          "Assessment Reminders",
+          "7th Day Reminder"
+        ]
+      },
+      {
+        "name": "Notifications",
+        "heading": "Enable Notifications",
+        "contents": [
+          "Enable Notifications"
+        ]
+      }
+    ]
   }
 }

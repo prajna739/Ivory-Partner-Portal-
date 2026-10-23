@@ -1992,6 +1992,25 @@ async verifyAssessmentsPageTitle(title, timeout) {
     await this.page.waitForTimeout(settleMs);
   }
 
+  // Hovers the three dots and waits for the given action button. The hover is repeated when the page was still busy
+  // (e.g. a pop-up was just closed or the table was refreshing), so the buttons do not appear on the first attempt.
+  async #revealAction(row, actionsIdx, btn, settleMs, label, name) {
+    const dots = row.locator('td').nth(actionsIdx).getByRole('button').first();
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await this.#hoverRowActions(row, actionsIdx, settleMs);
+      if (await btn.first().isVisible()) return;
+      // a slower, step-by-step mouse move so the page sees the pointer entering the row
+      const box = await dots.boundingBox();
+      if (box) {
+        await this.page.mouse.move(box.x - 40, box.y + box.height / 2);
+        await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 12 });
+      }
+      await this.page.waitForTimeout(settleMs);
+      if (await btn.first().isVisible()) return;
+    }
+    await expect(btn.first(), `${label}: "${name}" after hovering the three dots`).toBeVisible();
+  }
+
   // Disabled "User Notified" button: hovering it explains when the next reminder can be sent
   async #verifyNotifiedTooltip(label, disabledBtn, nu) {
     await expect(disabledBtn.first(), `${label}: "${nu.disabledName}" should be disabled`).toBeDisabled();
@@ -2050,4 +2069,1186 @@ async verifyAssessmentsPageTitle(title, timeout) {
     console.log(`Notify User: ${sent} notification(s) sent, ${alreadyNotified} already notified, ${wanted.length} row(s) checked`);
   }
 
+  // ---------- NEW: Show Key flow (hover three dots -> Show Key -> expired / active pop-up) ----------
+
+  #escRe(v) {
+    return String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  // The "User Authentication Key" pop-up (the smallest block holding both its title and its Close button)
+  #keyDialog(sk) {
+    return this.page
+      .locator('div')
+      .filter({ has: this.page.getByText(sk.dialogTitle, { exact: true }) })
+      .filter({ has: this.page.getByRole('button', { name: sk.closeButton, exact: true }) })
+      .last();
+  }
+
+  // Reads the key and the "Expires: / Expired:" date and time shown in the pop-up
+  async #readKey(dialog, sk) {
+    const text = (await dialog.innerText()).replace(/\s+/g, ' ');
+    const m = text.match(new RegExp(sk.keyPattern));
+    return { key: m ? m[1] : null, kind: m ? m[2] : null, at: m ? m[3] : null, text };
+  }
+
+  async #verifyKeyShown(label, dialog, sk, expectExpired) {
+    const info = await this.#readKey(dialog, sk);
+    expect(info.key, `${label}: the key should be displayed. Pop-up text: "${info.text}"`).not.toBeNull();
+    expect(info.at, `${label}: the key's date and time should be displayed. Pop-up text: "${info.text}"`).not.toBeNull();
+    const when = new Date(info.at.replace(/\s+/g, ' '));
+    expect.soft(Number.isNaN(when.getTime()), `${label}: "${info.at}" should be a valid date`).toBe(false);
+    if (!Number.isNaN(when.getTime())) {
+      const inPast = when.getTime() < Date.now();
+      expect.soft(inPast, `${label}: the date ${info.at} should be in the ${expectExpired ? 'past (expired)' : 'future (active)'}`).toBe(expectExpired);
+    }
+    console.log(`${label}: key = ${info.key} | ${info.kind}: ${info.at}`);
+    return info;
+  }
+
+  async #openShowKey(ap, tb, sk, rowIndex, actionsIdx, label) {
+    const rows = E2ELocators.assessmentRows(this.page);
+    const row = rows.nth(rowIndex);
+    const showBtn = row.getByRole('button', { name: sk.buttonName });
+    await this.#revealAction(row, actionsIdx, showBtn, sk.settleMs, label, sk.buttonName);
+    await showBtn.first().click();
+    const dialog = this.#keyDialog(sk);
+    await expect(dialog, `${label}: "${sk.dialogTitle}" pop-up`).toBeVisible({ timeout: ap.loadTimeoutMs });
+    return dialog;
+  }
+
+  // Regenerate Key -> "Are you sure?" -> Yes, Regenerate -> success message -> new key shown
+  async #regenerateKey(label, dialog, sk, oldKey) {
+    await dialog.getByRole('button', { name: sk.regenerateButton, exact: true }).click();
+    await expect(dialog.getByRole('button', { name: sk.confirmButton }), `${label}: "${sk.confirmButton}" button`).toBeVisible();
+    await dialog.getByRole('button', { name: sk.confirmButton }).click();
+    await expect(this.page.getByText(sk.regeneratedMessage).first(), `${label}: success message "${sk.regeneratedMessage}"`).toBeVisible({ timeout: sk.toastTimeoutMs });
+    await expect.poll(async () => (await this.#readKey(dialog, sk)).key, { message: `${label}: a new key should replace "${oldKey}"`, timeout: sk.toastTimeoutMs }).not.toBe(oldKey);
+  }
+
+  async #closeKeyDialog(label, dialog, sk) {
+    await dialog.getByRole('button', { name: sk.closeButton, exact: true }).last().click();
+    await expect(this.page.getByText(sk.dialogTitle, { exact: true }), `${label}: pop-up should close`).toBeHidden();
+  }
+
+  async verifyShowKey(ap, tb, sk) {
+    expect(sk, 'showKey is missing in E2EData.json').toBeDefined();
+    const rows = E2ELocators.assessmentRows(this.page);
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+    const statusIdx = await this.#tableColumn(tb, sk.statusColumn);
+    const actionsIdx = await this.#tableColumn(tb, tb.rowActions.actionsColumn);
+
+    // 1. a row with the "Assigned" status
+    const count = await rows.count();
+    let chosen = -1;
+    for (let i = 0; i < count; i++) {
+      const status = (await rows.nth(i).locator('td').nth(statusIdx).innerText()).trim();
+      if (status.toLowerCase() === sk.status.toLowerCase()) { chosen = i; break; }
+    }
+    expect(chosen, `A row with status "${sk.status}" should be on page 1`).toBeGreaterThanOrEqual(0);
+
+    // 2. hover the three dots and click Show Key
+    let dialog = await this.#openShowKey(ap, tb, sk, chosen, actionsIdx, `Show Key row ${chosen + 1}`);
+
+    // 3. either the expired pop-up or the active pop-up is displayed
+    const expiredMsg = dialog.getByText(sk.expiredMessage);
+    const infoMsg = dialog.getByText(new RegExp(this.#escRe(sk.infoMessage).replace(/:\s/, ':\\s*')));
+    await expect(expiredMsg.or(infoMsg).first(), 'Either the expired or the active key pop-up should be displayed').toBeVisible();
+
+    if ((await expiredMsg.count()) > 0) {
+      // 4. expired: generate a new key, confirm, close
+      const old = await this.#verifyKeyShown('Expired key', dialog, sk, true);
+      expect(old.text, 'The expired pop-up should be marked as expired').toMatch(new RegExp(sk.expiredTag, 'i'));
+      await this.#regenerateKey('Expired key', dialog, sk, old.key);
+      await this.#verifyKeyShown('Expired key, regenerated', dialog, sk, false);
+      await this.#closeKeyDialog('Expired key', dialog, sk);
+
+      // open Show Key again: the key is active now, so the rest of the flow can run
+      dialog = await this.#openShowKey(ap, tb, sk, chosen, actionsIdx, `Show Key row ${chosen + 1} (again)`);
+      await expect(dialog.getByText(new RegExp(this.#escRe(sk.infoMessage).replace(/:\s/, ':\\s*'))).first(), 'Active key pop-up').toBeVisible();
+    }
+
+    // 5. active pop-up: info text, key and expiry date
+    await expect(dialog.getByText(new RegExp(this.#escRe(sk.infoMessage).replace(/:\s/, ':\\s*'))).first(), `Info text "${sk.infoMessage}"`).toBeVisible();
+    const first = await this.#verifyKeyShown('Active key', dialog, sk, false);
+
+    // 6. copy to clipboard -> success message
+    await dialog.getByRole('button', { name: sk.copyButton }).click();
+    await expect(this.page.getByText(sk.copiedMessage).first(), `Message "${sk.copiedMessage}"`).toBeVisible({ timeout: sk.toastTimeoutMs });
+
+    // 7-9. Regenerate Key -> confirmation text with Yes / Cancel -> Cancel
+    const regen = dialog.getByRole('button', { name: sk.regenerateButton, exact: true });
+    await regen.click();
+    await expect(dialog.getByText(sk.confirmMessage), `Confirmation "${sk.confirmMessage}"`).toBeVisible();
+    await expect(dialog.getByRole('button', { name: sk.confirmButton }), `"${sk.confirmButton}" button`).toBeVisible();
+    await expect(dialog.getByRole('button', { name: sk.cancelButton }), `"${sk.cancelButton}" button`).toBeVisible();
+    await dialog.getByRole('button', { name: sk.cancelButton }).click();
+    await expect(dialog.getByText(sk.confirmMessage), 'Confirmation should close after Cancel').toBeHidden();
+    expect.soft((await this.#readKey(dialog, sk)).key, 'Cancel should keep the same key').toBe(first.key);
+
+    // 10-11. Regenerate Key again -> Yes, Regenerate -> success message and the new key
+    await this.#regenerateKey('Active key', dialog, sk, first.key);
+    const second = await this.#verifyKeyShown('Active key, regenerated', dialog, sk, false);
+    console.log(`Key changed: ${first.key} -> ${second.key}`);
+
+    // 12. close
+    await this.#closeKeyDialog('Active key', dialog, sk);
+  }
+
+  // ---------- NEW: View History flow (hover three dots -> View History -> Assessment History page -> Back) ----------
+
+  async verifyViewHistory(ap, tb, vh) {
+    expect(vh, 'viewHistory is missing in E2EData.json').toBeDefined();
+    const rows = E2ELocators.assessmentRows(this.page);
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+    const userIdx = await this.#tableColumn(tb, tb.userColumn);
+    const statusIdx = await this.#tableColumn(tb, vh.statusColumn);
+    const actionsIdx = await this.#tableColumn(tb, tb.rowActions.actionsColumn);
+    const esc = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // 1. a row with the "Assigned" status
+    const count = await rows.count();
+    let chosen = -1;
+    let user = '';
+    for (let i = 0; i < count; i++) {
+      const cells = rows.nth(i).locator('td');
+      const status = (await cells.nth(statusIdx).innerText()).trim();
+      if (status.toLowerCase() === vh.status.toLowerCase()) {
+        user = (await cells.nth(userIdx).innerText()).split('\n')[0].trim();
+        chosen = i;
+        break;
+      }
+    }
+    expect(chosen, `A row with status "${vh.status}" should be on page 1`).toBeGreaterThanOrEqual(0);
+    console.log(`View History row ${chosen + 1}: ${user}`);
+
+    // 2. hover the three dots and click View History
+    const row = rows.nth(chosen);
+    const historyBtn = row.getByRole('button', { name: vh.buttonName });
+    await this.#revealAction(row, actionsIdx, historyBtn, vh.settleMs, `View History row ${chosen + 1}`, vh.buttonName);
+    await historyBtn.first().click();
+
+    // 3. the history page opens
+    const heading = this.page.getByText(new RegExp(`${esc(user)}\\s*[—–-]\\s*${esc(vh.headingSuffix)}`)).first();
+    await expect(heading, `"${user} — ${vh.headingSuffix}" page should open`).toBeVisible({ timeout: ap.loadTimeoutMs });
+
+    // 4. "<n> assessments across <m> types"
+    const summary = this.page.getByText(new RegExp(vh.summaryPattern)).first();
+    await expect(summary, `Summary line like "${vh.summaryExample}"`).toBeVisible();
+    const m = (await summary.innerText()).replace(/\s+/g, ' ').match(new RegExp(vh.summaryPattern));
+    const assessments = Number(m[1]);
+    const types = Number(m[2]);
+    expect(assessments, 'Number of assessments in the summary').toBeGreaterThan(0);
+    expect(types, 'Number of types in the summary').toBeGreaterThan(0);
+    expect(assessments, 'Assessments should not be fewer than types').toBeGreaterThanOrEqual(types);
+    console.log(`History summary: ${assessments} assessment(s) across ${types} type(s)`);
+
+    // the type tabs carry a count each; they should add up to the summary
+    const tabTexts = (await this.page.getByRole('button').allInnerTexts())
+      .map((t) => t.replace(/\s+/g, ' ').trim())
+      .filter((t) => new RegExp(vh.typeTabPattern).test(t));
+    if (tabTexts.length > 0) {
+      const sum = tabTexts.reduce((s, t) => s + Number(t.match(new RegExp(vh.typeTabPattern))[1]), 0);
+      expect.soft(tabTexts.length, `Type tabs (${tabTexts.join(' | ')}) should match the number of types`).toBe(types);
+      expect.soft(sum, `Type tab counts (${tabTexts.join(' | ')}) should add up to the number of assessments`).toBe(assessments);
+    }
+
+    // 5. Sessions table with Date, Status, Score, Report
+    await expect(this.page.getByText(new RegExp(`^\\s*${esc(vh.sessionsTitle)}\\b`)).first(), `"${vh.sessionsTitle}" section`).toBeVisible();
+    for (const name of vh.sessionHeaders) {
+      const re = new RegExp(`^\\s*${esc(name)}\\s*$`, 'i');
+      const header = this.page.getByRole('columnheader', { name: re }).or(this.page.getByText(re)).first();
+      await expect.soft(header, `Sessions table header "${name}"`).toBeVisible();
+    }
+    console.log(`Sessions table headers: ${vh.sessionHeaders.join(', ')}`);
+
+    // 6. Back goes to the assessments list
+    const back = this.page.getByRole('button', { name: vh.backButton }).or(this.page.getByRole('link', { name: vh.backButton })).first();
+    await back.click();
+    await expect(heading, 'History page should close after Back').toBeHidden({ timeout: ap.loadTimeoutMs });
+    await expect(E2ELocators.assessmentRows(this.page).first(), 'Assessments list after Back').toBeVisible({ timeout: ap.loadTimeoutMs });
+  }
+
+  // ---------- NEW: Ivory Report flow (find a Completed row on any page -> three dots -> Ivory Report -> back) ----------
+
+  // Goes to the next page of the table; returns false when it is already the last page
+  async #nextTablePage(fp, ir) {
+    const bottom = E2ELocators.bottomCount(this.page, fp.bottomCountPattern).first();
+    const nums = ((await bottom.innerText()).match(/\d[\d,]*/g) || []).map((v) => Number(v.replace(/,/g, '')));
+    const [start, end, total] = nums;
+    if (end >= total) return false;
+
+    // only the table's pagination bar ("Next →" button); the top menu is a different navigation (it holds "Logout")
+    const nav = this.page.getByRole('navigation', { name: ir.paginationName, exact: true });
+    const next = nav.getByRole('button', { name: ir.nextButton });
+    if (!(await next.isEnabled())) return false;
+    await next.scrollIntoViewIfNeeded();
+    await next.click();
+    await expect(bottom, `Should move on from rows starting at ${start}`).not.toHaveText(new RegExp(`Showing ${start} to`), { timeout: ir.pageChangeTimeoutMs });
+    await expect(E2ELocators.assessmentRows(this.page).first(), 'Rows of the next page').toBeVisible({ timeout: ir.pageChangeTimeoutMs });
+    return true;
+  }
+
+  async verifyIvoryReport(ap, fp, tb, ir) {
+    expect(ir, 'ivoryReport is missing in E2EData.json').toBeDefined();
+    const rows = E2ELocators.assessmentRows(this.page);
+
+    // 1. go to the Assessments page (page 1)
+    await this.page.getByRole('link', { name: ir.navTab, exact: true }).click();
+    await expect(E2ELocators.assessmentsPageTitle(this.page, ap.pageTitle), `"${ap.pageTitle}" page`).toBeVisible({ timeout: ap.loadTimeoutMs });
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout: ap.loadTimeoutMs });
+
+    const userIdx = await this.#tableColumn(tb, tb.userColumn);
+    const typeIdx = await this.#tableColumn(tb, ir.typeColumn);
+    const statusIdx = await this.#tableColumn(tb, ir.statusColumn);
+    const actionsIdx = await this.#tableColumn(tb, tb.rowActions.actionsColumn);
+
+    // 2-3. look for a Completed row, page by page
+    let found = null;
+    let pageNo = 1;
+    for (;;) {
+      const count = await rows.count();
+      for (let i = 0; i < count; i++) {
+        const cells = rows.nth(i).locator('td');
+        const status = (await cells.nth(statusIdx).innerText()).trim();
+        if (status.toLowerCase() === ir.status.toLowerCase()) {
+          found = {
+            index: i,
+            user: (await cells.nth(userIdx).innerText()).split('\n')[0].trim(),
+            type: (await cells.nth(typeIdx).innerText()).replace(/\s+/g, ' ').trim(),
+          };
+          break;
+        }
+      }
+      if (found) break;
+      console.log(`Page ${pageNo}: no "${ir.status}" assessment`);
+      if (!(await this.#nextTablePage(fp, ir))) break;
+      pageNo++;
+    }
+    expect(found, `A "${ir.status}" assessment should exist on one of the ${pageNo} page(s) checked`).not.toBeNull();
+
+    // 4. the user and the assessment name
+    console.log(`"${ir.status}" assessment found on page ${pageNo}, row ${found.index + 1}: user "${found.user}", assessment "${found.type || '(no assessment name shown)'}"`);
+
+    // 5-6. hover the three dots and click Ivory Report
+    const row = rows.nth(found.index);
+    const reportBtn = row.getByRole('button', { name: ir.buttonName });
+    await this.#revealAction(row, actionsIdx, reportBtn, ir.settleMs, `Ivory Report row ${found.index + 1}`, ir.buttonName);
+    await expect(reportBtn.first(), `"${ir.buttonName}" should be enabled`).toBeEnabled();
+
+    const popupPromise = this.page.context().waitForEvent('page', { timeout: ir.reportOpenTimeoutMs }).catch(() => null);
+    const urlBefore = this.page.url();
+    await reportBtn.first().click();
+
+    // 7. the report page opens (normally in a new tab)
+    const popup = await popupPromise;
+    const reportPage = popup || this.page;
+    if (!popup) {
+      await expect.poll(() => this.page.url(), { message: 'The report should open in a new tab or in this tab', timeout: ir.reportOpenTimeoutMs }).not.toBe(urlBefore);
+    }
+    await expect.poll(() => reportPage.url(), { message: `Report address should match ${ir.reportUrlPattern}`, timeout: ir.reportOpenTimeoutMs }).toMatch(new RegExp(ir.reportUrlPattern, 'i'));
+    console.log(`Report opened (${popup ? 'new tab' : 'same tab'}): ${reportPage.url().split('?')[0]}`);
+
+    // 8. come back to the assessments page
+    if (popup) {
+      await popup.close();
+      await this.page.bringToFront();
+    } else {
+      await this.page.goBack();
+    }
+    await expect(E2ELocators.assessmentsPageTitle(this.page, ap.pageTitle), 'Back on the Assessments page').toBeVisible({ timeout: ap.loadTimeoutMs });
+    await expect(rows.first(), 'Assessments table after coming back').toBeVisible({ timeout: ap.loadTimeoutMs });
+  }
+
+  // ---------- NEW: Pagination (footer text, total pages, page 2, Next and Previous) ----------
+
+  #parseFooter(text) {
+    const n = (text.match(/\d[\d,]*/g) || []).map((v) => Number(v.replace(/,/g, '')));
+    return { start: n[0], end: n[1], total: n[2] };
+  }
+
+  // The footer must read "Showing <start> to <end> of <total> results" for the given page
+  async #expectPage(label, bottom, pageNo, pageSize, total, timeout) {
+    const start = (pageNo - 1) * pageSize + 1;
+    const end = Math.min(pageNo * pageSize, total);
+    const thousands = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ',?');
+    await expect(bottom, `${label}: footer should read "Showing ${start} to ${end} of ${total} results"`)
+      .toHaveText(new RegExp(`Showing\\s+${start}\\s+to\\s+${end}\\s+of\\s+${thousands}\\s+results`), { timeout });
+    await expect(E2ELocators.assessmentRows(this.page).first(), `${label}: rows`).toBeVisible({ timeout });
+    console.log(`${label}: "${(await bottom.innerText()).trim()}"`);
+  }
+
+  async verifyPagination(ap, fp, tb, pg) {
+    expect(pg, 'pagination is missing in E2EData.json').toBeDefined();
+    const timeout = ap.loadTimeoutMs;
+    const rows = E2ELocators.assessmentRows(this.page);
+    const bottom = E2ELocators.bottomCount(this.page, fp.bottomCountPattern).first();
+    const nav = this.page.getByRole('navigation', { name: pg.paginationName, exact: true });
+    const prev = nav.getByRole('button', { name: pg.previousButton });
+    const next = nav.getByRole('button', { name: pg.nextButton });
+
+    // start from page 1 of the full list
+    await this.page.getByRole('link', { name: pg.navTab, exact: true }).click();
+    await expect(E2ELocators.assessmentsPageTitle(this.page, ap.pageTitle), `"${ap.pageTitle}" page`).toBeVisible({ timeout });
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout });
+    await bottom.scrollIntoViewIfNeeded();
+
+    // The page keeps its position when the Assessments tab is clicked again (e.g. after the Ivory Report step left it on
+    // page 2), so go to page 1 explicitly before checking the first page.
+    if (this.#parseFooter(await bottom.innerText()).start !== 1) {
+      await E2ELocators.paginationButton(this.page, pg.paginationName, 1).click();
+      await expect(bottom, 'Should be back on page 1').toHaveText(/Showing\s+1\s+to/, { timeout });
+    }
+
+    // 1. "Showing <n> to <n> of <n> results"
+    await expect(bottom, 'Footer text "Showing <n> to <n> of <n> results"').toBeVisible({ timeout });
+    const { start, end, total } = this.#parseFooter(await bottom.innerText());
+    const pageSize = end - start + 1;
+    expect(start, 'Footer should start at result 1 on the first page').toBe(1);
+    expect(pageSize, 'Results per page in the footer').toBe(tb.rowsPerPage);
+    expect(total, 'Total results in the footer should be more than one page').toBeGreaterThan(pageSize);
+    const top = (await E2ELocators.assessmentsCount(this.page, ap.countPattern).innerText()).match(/\d[\d,]*/g).map((v) => Number(v.replace(/,/g, '')));
+    expect.soft(total, `Footer total should match the top count "${top.join(' ')}"`).toBe(top[2]);
+    console.log(`Footer: Showing ${start} to ${end} of ${total} results`);
+
+    // 2. total pages: the last numbered button equals ceil(total / page size)
+    const totalPages = Math.ceil(total / pageSize);
+    const numbers = (await nav.getByRole('button').allInnerTexts()).map((t) => t.trim()).filter((t) => /^\d+$/.test(t)).map(Number);
+    expect(Math.max(...numbers), `Last page number should be ${totalPages} (${total} results / ${pageSize} per page)`).toBe(totalPages);
+    console.log(`Total pages: ${totalPages}`);
+
+    // on the first page Previous is disabled and Next is enabled
+    await expect(prev, `"${pg.previousButton}" is disabled on page 1`).toBeDisabled();
+    await expect(next, `"${pg.nextButton}" is enabled on page 1`).toBeEnabled();
+    const firstRowPage1 = (await rows.first().innerText()).replace(/\s+/g, ' ');
+
+    // 3. click page 2
+    await E2ELocators.paginationButton(this.page, pg.paginationName, pg.jumpPage).click();
+    await this.#expectPage(`Page ${pg.jumpPage}`, bottom, pg.jumpPage, pageSize, total, timeout);
+    await expect(prev, `"${pg.previousButton}" is enabled on page ${pg.jumpPage}`).toBeEnabled();
+    expect.soft((await rows.first().innerText()).replace(/\s+/g, ' '), 'Page 2 should show different rows from page 1').not.toBe(firstRowPage1);
+
+    // 4. Next -> the page after, then Previous -> back
+    await next.click();
+    await this.#expectPage(`Next (page ${pg.jumpPage + 1})`, bottom, pg.jumpPage + 1, pageSize, total, timeout);
+    await prev.click();
+    await this.#expectPage(`Previous (page ${pg.jumpPage})`, bottom, pg.jumpPage, pageSize, total, timeout);
+
+    // Previous again returns to page 1, where Previous is disabled
+    await prev.click();
+    await this.#expectPage('Previous (page 1)', bottom, 1, pageSize, total, timeout);
+    await expect(prev, `"${pg.previousButton}" is disabled again on page 1`).toBeDisabled();
+  }
+//---------------------------------------------
+//user
+//---------------------------------------------------
+
+  async verifyUsersPageTitle(title, timeout) {
+    expect(title, 'users.pageTitle is missing in E2EData.json').toBeTruthy();
+    const heading = E2ELocators.usersPageTitle(this.page, title);
+    await expect(heading, `Page title "${title}"`).toBeVisible({ timeout });
+    await expect(heading, `Page title "${title}"`).toHaveText(title);
+    console.log(`Page title shown: "${(await heading.innerText()).trim()}"`);
+  }
+
+  // The Users tab is active and looks different from each of the other tabs
+  async verifyUsersTabHighlighted() {
+    await this.verifyTabIsActive(this.userClick);
+    for (const other of [this.dashboardClick, this.assessmentClick, this.productClick]) {
+      await this.verifyTabIsNotActive(other);
+      await this.verifyTabIsHighlighted(this.userClick, other);
+    }
+    console.log('Users tab is highlighted; the other tabs are not');
+  }
+    // Users page stat cards: each shows its label and a value in the expected format; the values are printed
+  async verifyUserCards(cards, timeout) {
+    expect(cards, 'users.cards is missing in E2EData.json').toBeDefined();
+    console.log('----- Users card values -----');
+    const values = {};
+
+    for (const c of cards) {
+      await expect(E2ELocators.usersCardLabel(this.page, c.label), `Label "${c.label}"`).toBeVisible({ timeout });
+
+      // the card only matches when its text is exactly "<label> <value>", so this also checks the value format
+      const card = E2ELocators.usersCard(this.page, c.label, c.pattern);
+      await expect(card, `Card "${c.label}" should show a value matching ${c.pattern}`).toBeVisible({ timeout });
+
+      const text = (await card.innerText()).replace(/\s+/g, ' ').trim();
+      values[c.label] = text.replace(c.label, '').trim();
+      console.log(`${c.label}: ${values[c.label]}`);
+    }
+    return values;
+  }
+    // Users page table: column headers, rows per page, and the "Showing .. of .. users" counts (the numbers are printed)
+  async verifyUserTable(ut, timeout) {
+    expect(ut, 'users.table is missing in E2EData.json').toBeDefined();
+    const numbers = (text) => (text.match(/\d[\d,]*/g) || []).map((v) => Number(v.replace(/,/g, '')));
+
+    // 4. column headers (the page shows them in capitals, so they are compared ignoring case; a sort arrow after a name is ignored)
+    const headerCells = E2ELocators.usersHeaders(this.page);
+    await expect(headerCells.first(), 'Table headers').toBeVisible({ timeout });
+    const shown = (await headerCells.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
+    expect(shown.length, `Table should have ${ut.headers.length} columns, found: ${shown.join(' | ')}`).toBe(ut.headers.length);
+    ut.headers.forEach((name, i) => {
+      expect.soft(shown[i].toLowerCase().startsWith(name.toLowerCase()), `Column ${i + 1} should be "${name}" (found "${shown[i]}")`).toBe(true);
+    });
+    console.log(`Users table headers: ${shown.join(' | ')}`);
+
+    // 2. rows per page, and every row has a name
+    const rows = E2ELocators.usersRows(this.page);
+    await expect(rows.first(), 'First table row').toBeVisible({ timeout });
+    const rowCount = await rows.count();
+    expect(rowCount, `Rows on the page (limit ${ut.rowsPerPage})`).toBe(ut.rowsPerPage);
+    for (let i = 0; i < rowCount; i++) {
+      const name = (await rows.nth(i).locator('td').first().innerText()).replace(/\s+/g, ' ').trim();
+      expect.soft(name, `Row ${i + 1} should show a name`).not.toBe('');
+    }
+    console.log(`Rows on the page: ${rowCount}`);
+
+    // 3. "Showing <n> - <n> of <n> users" under "User Management", and "Showing <n> to <n> of <n> users" below the table
+    const topCount = E2ELocators.usersCount(this.page, ut.topCountPattern);
+    await expect(topCount, `Count text like "Showing 1 - 10 of 50 users"`).toBeVisible({ timeout });
+    const [topStart, topEnd, topTotal] = numbers(await topCount.innerText());
+    console.log(`User Management count: "${(await topCount.innerText()).trim()}" -> Showing ${topStart} - ${topEnd} of ${topTotal} users`);
+    expect(topStart, 'Count should start at 1 on the first page').toBe(1);
+    expect(topEnd - topStart + 1, 'Count range should equal the rows shown').toBe(rowCount);
+    expect(topTotal, 'Total users should not be less than the rows shown').toBeGreaterThanOrEqual(topEnd);
+
+    const bottomCount = E2ELocators.usersCount(this.page, ut.bottomCountPattern);
+    await bottomCount.scrollIntoViewIfNeeded();
+    await expect(bottomCount, `Footer text like "Showing 1 to 10 of 50 users"`).toBeVisible({ timeout });
+    const [botStart, botEnd, botTotal] = numbers(await bottomCount.innerText());
+    console.log(`Footer count: "${(await bottomCount.innerText()).trim()}" -> Showing ${botStart} to ${botEnd} of ${botTotal} users`);
+    expect.soft([botStart, botEnd, botTotal], 'Footer numbers should match the numbers under "User Management"').toEqual([topStart, topEnd, topTotal]);
+  }
+  async verifyUserAssessmentCounts(ac, timeout) {
+  expect(ac?.columnHeader, 'users.table.assessmentCounts is missing in E2EData.json').toBeTruthy();
+  const headers = (await E2ELocators.usersHeaders(this.page).allInnerTexts()).map(t => t.trim().toLowerCase());
+  const colIndex = headers.findIndex(h => h.startsWith(ac.columnHeader.toLowerCase()));
+  expect(colIndex, `Column "${ac.columnHeader}" not found`).toBeGreaterThanOrEqual(0);
+
+  const rows = E2ELocators.usersRows(this.page);
+  await expect(rows.first(), 'Users table rows').toBeVisible({ timeout });
+  const checkCount = Math.min(ac.rowsToCheck, await rows.count());
+  expect(checkCount, 'Rows available to check').toBeGreaterThan(0);
+
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const read = (text, label) => {
+    const m = text.match(new RegExp(`(\\d+)\\s*${escape(label)}`, 'i'));
+    return m ? Number(m[1]) : null;
+  };
+
+  for (let i = 0; i < checkCount; i++) {
+    const row = rows.nth(i);
+    const name = (await row.locator('td').first().innerText()).trim().split('\n').pop().trim();
+    const text = await E2ELocators.usersRowCell(row, colIndex).innerText();
+    const v = {};
+    for (const [key, label] of Object.entries(ac.labels)) {
+      v[key] = read(text, label);
+      expect(v[key], `Row ${i + 1} (${name}): "${label}" count is missing in "${text.replace(/\s+/g, ' ')}"`).not.toBeNull();
+    }
+    const sum = v.assigned + v.inProgress + v.completed;
+    expect(v.total, `Row ${i + 1} (${name}): ${ac.labels.total} ${v.total} should equal ${sum}`).toBe(sum);
+    console.log(`Row ${i + 1} ${name}: ${ac.labels.total}=${v.total}, ${ac.labels.assigned}=${v.assigned}, ${ac.labels.inProgress}=${v.inProgress}, ${ac.labels.completed}=${v.completed} -> ${v.total} = ${sum}`);
+  }
+}
+async verifyUserSorting(sort, timeout) {
+  expect(sort?.columns?.length, 'users.table.sort is missing in E2EData.json').toBeGreaterThan(0);
+  const headers = E2ELocators.usersHeaders(this.page);
+  const rows = E2ELocators.usersRows(this.page);
+  await expect(rows.first(), 'Users table rows').toBeVisible({ timeout });
+  const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
+
+  const arrowOf = async (index) => {
+    const text = await headers.nth(index).innerText();
+    if (sort.ascArrows.some(a => text.includes(a))) return 'asc';
+    if (sort.descArrows.some(a => text.includes(a))) return 'desc';
+    return 'none';
+  };
+
+  const texts = (await headers.allInnerTexts()).map(t => t.trim().toLowerCase());
+  const indexOf = {};
+  for (const col of sort.columns) {
+    const i = texts.findIndex(t => t.startsWith(col.header.toLowerCase()));
+    expect(i, `Column "${col.header}" not found`).toBeGreaterThanOrEqual(0);
+    indexOf[col.header] = i;
+  }
+
+  const parse = (col, cellText) => {
+    const lines = cellText.split('\n').map(l => l.trim()).filter(Boolean);
+  if (col.type === 'text') {
+  if (col.pattern) {
+    const hit = cellText.match(new RegExp(col.pattern));
+    return hit ? hit[0] : '';
+  }
+  const line = col.line === 'last' ? lines[lines.length - 1] : lines[0];
+  expect(line, `${col.header}: empty cell`).toBeTruthy();
+  return line;
+}
+    const m = cellText.match(new RegExp(col.pattern));
+    expect(m, `${col.header}: value not found in "${cellText.replace(/\s+/g, ' ')}"`).not.toBeNull();
+    if (col.type === 'date') {
+      const p = {};
+      col.dateOrder.split('').forEach((k, i) => { p[k] = Number(m[i + 1]); });
+      return Date.UTC(p.y, p.m - 1, p.d);
+    }
+    return Number(m[1]);
+  };
+  const compare = (col, a, b) => {
+  if (col.type !== 'text') return a - b;
+  if (col.caseSensitive) return a < b ? -1 : a > b ? 1 : 0;
+  return collator.compare(a, b);
+};
+  for (const col of sort.columns) {
+    const index = indexOf[col.header];
+    const states = [];
+    for (let click = 1; click <= sort.clicks; click++) {
+      const before = await arrowOf(index);
+      await headers.nth(index).click();
+      await expect.poll(() => arrowOf(index), { timeout, message: `${col.header}: sort arrow did not change after click ${click}` }).not.toBe(before);
+      await this.page.waitForTimeout(sort.settleMs);
+      const state = await arrowOf(index);
+      expect(state, `${col.header}: no sort arrow shown`).not.toBe('none');
+
+      for (const other of sort.columns) {
+        if (other.header === col.header) continue;
+        expect(await arrowOf(indexOf[other.header]), `"${other.header}" should show no arrow while "${col.header}" is sorted`).toBe('none');
+      }
+
+      const count = await rows.count();
+      const values = [];
+      for (let i = 0; i < count; i++) {
+        values.push(parse(col, await E2ELocators.usersRowCell(rows.nth(i), index).innerText()));
+      }
+      for (let i = 1; i < values.length; i++) {
+        const c = compare(col, values[i - 1], values[i]);
+        const ok = state === 'asc' ? c <= 0 : c >= 0;
+        expect(ok, `${col.header} (${state}): row ${i} "${values[i - 1]}" and row ${i + 1} "${values[i]}" are out of order`).toBe(true);
+      }
+      const note = new Set(values).size === 1 ? ' (all values equal, order cannot be proven on this page)' : '';
+      console.log(`${col.header} sorted ${state}: ${values.join(' | ')}${note}`);
+      states.push(state);
+    }
+    expect(new Set(states).size, `${col.header}: the arrow did not toggle between clicks`).toBe(states.length);
+  }
+}
+
+  // ---------- Users page: row actions (three dots) and the Edit User pop-up ----------
+  async #usersActionsIndex(ra) {
+    const texts = (await E2ELocators.usersHeaders(this.page).allInnerTexts()).map((t) => t.trim().toLowerCase());
+    const i = texts.findIndex((t) => t.startsWith(ra.actionsColumn.toLowerCase()));
+    expect(i, `Column "${ra.actionsColumn}" not found`).toBeGreaterThanOrEqual(0);
+    return i;
+  }
+
+  // Hovers the three dots of one user row until the action buttons are shown; returns the row and the user name
+  async #usersHoverActions(rowIndex, ra, timeout) {
+    const rows = E2ELocators.usersRows(this.page);
+    await expect(rows.first(), 'Users table rows').toBeVisible({ timeout });
+    expect(await rows.count(), `Users table should have a row ${rowIndex + 1}`).toBeGreaterThan(rowIndex);
+    const actionsIdx = await this.#usersActionsIndex(ra);
+    const row = rows.nth(rowIndex);
+    const name = (await row.locator('td').first().innerText()).trim().split('\n').pop().trim();
+    const dots = E2ELocators.usersRowCell(row, actionsIdx).getByRole('button').first();
+    const firstAction = E2ELocators.userRowAction(row, ra.buttons[0]);
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await dots.scrollIntoViewIfNeeded();
+      await dots.hover();
+      await this.page.waitForTimeout(ra.settleMs);
+      if (await firstAction.isVisible()) break;
+      // a slower, step-by-step mouse move so the page sees the pointer entering the row
+      const box = await dots.boundingBox();
+      if (box) {
+        await this.page.mouse.move(box.x - 40, box.y + box.height / 2);
+        await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 12 });
+      }
+      await this.page.waitForTimeout(ra.settleMs);
+      if (await firstAction.isVisible()) break;
+    }
+    return { row, name };
+  }
+
+  // 1. Hover the three dots of a user: all the action buttons are shown (and hidden again when the mouse moves away)
+  async verifyUserRowActions(ra, timeout) {
+    expect(ra?.buttons?.length, 'users.rowActions is missing in E2EData.json').toBeGreaterThan(0);
+    await this.page.mouse.move(0, 0);
+    await this.page.waitForTimeout(ra.settleMs);
+    const beforeRow = E2ELocators.usersRows(this.page).nth(ra.hoverRow);
+    for (const label of ra.buttons) {
+      await expect.soft(E2ELocators.userRowAction(beforeRow, label), `"${label}" should be hidden before hovering the three dots`).toBeHidden();
+    }
+
+    const { row, name } = await this.#usersHoverActions(ra.hoverRow, ra, timeout);
+    for (const label of ra.buttons) {
+      const btn = E2ELocators.userRowAction(row, label);
+      await expect(btn, `${name}: "${label}" should be shown after hovering the three dots`).toBeVisible();
+      await expect.soft(btn, `${name}: "${label}" should be enabled`).toBeEnabled();
+    }
+    console.log(`User "${name}": after hover -> ${ra.buttons.join(', ')}`);
+
+    await this.page.mouse.move(0, 0);
+    await this.page.waitForTimeout(ra.settleMs);
+  }
+
+  // 2-4. Edit User: open it from the hover menu and close it with the Cancel button; then again on another user, closing it with the X icon
+  async verifyEditUser(ra, timeout) {
+    const ed = ra?.editDialog;
+    expect(ed, 'users.rowActions.editDialog is missing in E2EData.json').toBeDefined();
+    const scenarios = [
+      { how: `"${ed.cancelButton}" button`, rowIndex: ra.cancelRow, closer: (dialog) => E2ELocators.editUserCancel(dialog, ed.cancelButton) },
+      { how: 'close icon', rowIndex: ra.closeRow, closer: (dialog) => E2ELocators.editUserClose(dialog, ed.closeButton) },
+    ];
+
+    for (const sc of scenarios) {
+      await this.page.mouse.move(0, 0);
+      const { row, name } = await this.#usersHoverActions(sc.rowIndex, ra, timeout);
+      await E2ELocators.userRowAction(row, ra.editButton).click();
+
+      const dialog = E2ELocators.editUserDialog(this.page, ed.title, ed.cancelButton);
+      await expect(dialog, `"${ed.title}" pop-up for "${name}"`).toBeVisible({ timeout });
+      for (const label of ed.infoLabels) {
+        await expect.soft(dialog.getByText(label).first(), `Pop-up should show "${label}"`).toBeVisible();
+      }
+      await expect.soft(dialog.getByText(name).first(), `Pop-up should show the user "${name}"`).toBeVisible();
+      await expect.soft(dialog.getByRole('button', { name: ed.saveButton, exact: true }), `"${ed.saveButton}" button`).toBeVisible();
+      console.log(`"${ed.title}" pop-up opened for "${name}"`);
+
+      await sc.closer(dialog).click();
+      await expect(dialog, `"${ed.title}" pop-up should close with the ${sc.how}`).toBeHidden({ timeout });
+      await expect(E2ELocators.usersRows(this.page).first(), 'Users table after closing the pop-up').toBeVisible({ timeout });
+      console.log(`"${ed.title}" pop-up closed with the ${sc.how}`);
+    }
+  }
+
+  // Users page: hover the three dots of a user -> "View Assessments" -> the Assessments page (with that user's results) -> "Back to Users"
+  async verifyUserViewAssessments(users, ap, timeout) {
+    const va = users?.viewAssessments;
+    expect(va, 'users.viewAssessments is missing in E2EData.json').toBeDefined();
+
+    // 1. hover the three dots of a user and click "View Assessments"
+    const { row, name } = await this.#usersHoverActions(va.row, users.rowActions, timeout);
+    await E2ELocators.userRowAction(row, va.button).click();
+
+    // 2. the Assessments page opens
+    await this.verifyAssessmentsPageTitle(ap.pageTitle, ap.loadTimeoutMs);
+    await expect(E2ELocators.backToUsers(this.page, va.backLink), `"${va.backLink}" link`).toBeVisible({ timeout });
+    await expect(E2ELocators.assessmentsLoading(this.page, ap.loadingText), 'Assessments should finish loading').toBeHidden({ timeout });
+
+    // 3. the result table with the "Showing <n> - <n> of <n> assessments" statement (the numbers can be anything; they are printed)
+    await expect(E2ELocators.assessmentsHeading(this.page, ap.heading), `"${ap.heading}"`).toBeVisible({ timeout });
+    const countText = E2ELocators.assessmentsCount(this.page, ap.countPattern);
+    await expect(countText, `Statement like "Showing 1 - 1 of 1 assessments"`).toBeVisible({ timeout });
+    const [start, end, total] = ((await countText.innerText()).match(/\d[\d,]*/g) || []).map((v) => Number(v.replace(/,/g, '')));
+    console.log(`"${name}" assessments: "${(await countText.innerText()).trim()}" -> Showing ${start} - ${end} of ${total} assessments`);
+    expect(end, 'Range end should not be less than its start').toBeGreaterThanOrEqual(start);
+    expect(total, 'Total should not be less than the range end').toBeGreaterThanOrEqual(end);
+
+    const rows = E2ELocators.assessmentRows(this.page);
+    await expect(rows.first(), 'Assessment results table').toBeVisible({ timeout });
+    expect(await rows.count(), 'Rows in the table should match the Showing statement').toBe(end - start + 1);
+    for (let i = 0; i < (await rows.count()); i++) {
+      await expect.soft(rows.nth(i), `Row ${i + 1} should belong to "${name}"`).toContainText(name);
+    }
+
+    // 4. the total / assigned / in-process / completed cards
+    await this.verifyAssessmentCards(ap.cards, ap.loadTimeoutMs);
+    const cardValues = await this.getAssessmentCardValues(ap.cards);
+    this.verifyAssessmentCardsSum(ap.cards, cardValues);
+    console.log(`Assessment cards: ${JSON.stringify(cardValues)}`);
+
+    // 5. "Back to Users" returns to the Users page
+    await E2ELocators.backToUsers(this.page, va.backLink).click();
+    await this.verifyUsersPageTitle(users.pageTitle, users.loadTimeoutMs);
+    await this.verifyUsersTabHighlighted();
+    await expect(E2ELocators.usersRows(this.page).first(), 'Users table after going back').toBeVisible({ timeout });
+    console.log(`"${va.backLink}" returned to the Users page`);
+  }
+
+  // Users page: hover the three dots of a user -> "View History" -> "<user> — Assessment History" page -> Back to the Users page
+  async verifyUserViewHistory(users, vh, timeout) {
+    const uh = users?.viewHistory;
+    expect(uh, 'users.viewHistory is missing in E2EData.json').toBeDefined();
+    expect(vh, 'viewHistory is missing in E2EData.json').toBeDefined();
+    const esc = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // 1. hover the three dots of a user and click "View History"
+    const { row, name } = await this.#usersHoverActions(uh.row, users.rowActions, timeout);
+    await E2ELocators.userRowAction(row, uh.button).click();
+
+    // 2. the "<user> — Assessment History" page opens, with the "<n> assessments across <m> types" line
+    const heading = this.page.getByText(new RegExp(`${esc(name)}\\s*[—–-]\\s*${esc(vh.headingSuffix)}`)).first();
+    await expect(heading, `"${name} — ${vh.headingSuffix}" page should open`).toBeVisible({ timeout });
+    const summary = this.page.getByText(new RegExp(vh.summaryPattern)).first();
+    await expect(summary, `Summary line like "${vh.summaryExample}"`).toBeVisible({ timeout });
+    const m = (await summary.innerText()).replace(/\s+/g, ' ').match(new RegExp(vh.summaryPattern));
+    console.log(`"${name}" history: ${Number(m[1])} assessment(s) across ${Number(m[2])} type(s)`);
+
+    // 3. the Sessions table with Date, Status, Score and Report, and its data
+    await expect(this.page.getByText(new RegExp(`^\\s*${esc(vh.sessionsTitle)}\\b`)).first(), `"${vh.sessionsTitle}" section`).toBeVisible({ timeout });
+    for (const header of vh.sessionHeaders) {
+      const re = new RegExp(`^\\s*${esc(header)}\\s*$`, 'i');
+      await expect.soft(this.page.getByRole('columnheader', { name: re }).or(this.page.getByText(re)).first(), `Sessions table header "${header}"`).toBeVisible();
+    }
+    console.log(`Sessions table headers: ${vh.sessionHeaders.join(', ')}`);
+
+    const sessionRows = this.page.locator('tbody tr').or(this.page.getByRole('row').filter({ hasNot: this.page.getByRole('columnheader') }));
+    await expect(sessionRows.first(), 'Sessions table should show data').toBeVisible({ timeout });
+    const rowCount = await sessionRows.count();
+    for (let i = 0; i < rowCount; i++) {
+      const cells = sessionRows.nth(i).getByRole('cell');
+      const values = (await cells.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
+      expect.soft(values.length, `Session ${i + 1} should have ${vh.sessionHeaders.length} columns (${values.join(' | ')})`).toBe(vh.sessionHeaders.length);
+      values.forEach((v, c) => expect.soft(v, `Session ${i + 1}: "${vh.sessionHeaders[c]}" should not be empty`).not.toBe(''));
+      expect.soft(values[0], `Session ${i + 1}: "${vh.sessionHeaders[0]}" should look like a date`).toMatch(new RegExp(uh.datePattern));
+      console.log(`Session ${i + 1}: ${vh.sessionHeaders.map((h, c) => `${h}=${values[c]}`).join(', ')}`);
+    }
+
+    // 4. the Back link returns to the Users page
+    const back = this.page.getByRole('button', { name: vh.backButton }).or(this.page.getByRole('link', { name: vh.backButton })).first();
+    await back.click();
+    await expect(heading, 'History page should close after Back').toBeHidden({ timeout });
+    await this.verifyUsersPageTitle(users.pageTitle, users.loadTimeoutMs);
+    await this.verifyUsersTabHighlighted();
+    await expect(E2ELocators.usersRows(this.page).first(), 'Users table after going back').toBeVisible({ timeout });
+    console.log(`"${vh.backButton}" returned to the Users page`);
+  }
+
+  // Users page: hover the three dots of a user -> "View Notes" -> pop-up -> Add Note + Cancel -> Add Note + Save -> Show more / Show less -> created date -> close icon
+  async verifyUserViewNotes(users, assessmentNotes, timeout) {
+    const vn = users?.viewNotes;
+    expect(vn, 'users.viewNotes is missing in E2EData.json').toBeDefined();
+    const esc = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const settle = () => this.page.waitForTimeout(vn.settleMs);
+
+    // 1. hover the three dots of a user and click "View Notes"
+    const { row, name } = await this.#usersHoverActions(vn.row, users.rowActions, timeout);
+    await E2ELocators.userRowAction(row, vn.button).click();
+
+    // 2. the notes pop-up is displayed
+    const title = `${vn.titlePrefix} ${name}`;
+    await expect(this.page.getByText(title, { exact: true }).first(), `"${title}" pop-up`).toBeVisible({ timeout });
+    const addNote = this.page.getByRole('button', { name: vn.addButton, exact: true });
+    await expect(addNote, `"${vn.addButton}" button`).toBeVisible({ timeout });
+    console.log(`"${title}" pop-up displayed`);
+
+    // 3. Add Note -> the note form -> Cancel
+    const box = this.page.getByPlaceholder(vn.placeholder);
+    const cancel = this.page.getByRole('button', { name: vn.cancelButton, exact: true });
+    const save = this.page.getByRole('button', { name: vn.saveButton, exact: true });
+    await addNote.click();
+    await expect(box, 'Note box').toBeVisible({ timeout });
+    await expect(cancel, `"${vn.cancelButton}" button`).toBeVisible();
+    await expect(save, `"${vn.saveButton}" button`).toBeVisible();
+    await cancel.click();
+    await expect(box, `Note box should close after "${vn.cancelButton}"`).toBeHidden({ timeout });
+    await expect(addNote, `"${vn.addButton}" button after Cancel`).toBeVisible({ timeout });
+    console.log(`"${vn.cancelButton}" closed the note box`);
+
+    // 4. Add Note again -> type a note -> Save Note (one more note is listed)
+    const created = this.page.getByText(new RegExp(`^\\s*${esc(vn.createdLabel)}`));
+    const before = await created.count();
+    await addNote.click();
+    await expect(box, 'Note box').toBeVisible({ timeout });
+    await box.fill(vn.noteText);
+    await save.click();
+    await expect(box, `Note box should close after "${vn.saveButton}"`).toBeHidden({ timeout });
+    await expect(this.page.getByText(vn.listTitle, { exact: true }).first(), `"${vn.listTitle}" section`).toBeVisible({ timeout });
+    await expect.poll(async () => created.count(), { timeout, message: 'One more note should be listed after saving' }).toBe(before + 1);
+    await settle();
+    console.log(`Note "${vn.noteText}" saved`);
+
+    // 5. Show more / Show less on the note
+    const card = E2ELocators.userNoteCard(this.page, vn.noteText, vn.createdLabel);
+    const showMore = card.getByText(vn.showMore, { exact: true });
+    const showLess = card.getByText(vn.showLess, { exact: true });
+    await expect(showMore, `"${vn.showMore}" option`).toBeVisible({ timeout });
+    await showMore.click();
+    await expect(showLess, `"${vn.showLess}" option after "${vn.showMore}"`).toBeVisible({ timeout });
+    await showLess.click();
+    await expect(showMore, `"${vn.showMore}" option after "${vn.showLess}"`).toBeVisible({ timeout });
+    console.log(`"${vn.showMore}" and "${vn.showLess}" work`);
+
+    // 6. the created date is shown (the date can be anything, but it must be a real date and time)
+    const cardText = (await card.innerText()).replace(/\s+/g, ' ');
+    const createdMatch = cardText.match(new RegExp(vn.createdPattern));
+    expect(createdMatch, `The note should show "${vn.createdLabel} <date and time>" (found "${cardText}")`).not.toBeNull();
+    const formats = assessmentNotes?.dateTimeFormats || [];
+    if (formats.length) {
+      expect.soft(formats.some((f) => new RegExp(f.pattern).test(createdMatch[1].trim())), `Created date "${createdMatch[1]}" should match one of: ${formats.map((f) => f.name).join(', ')}`).toBe(true);
+    }
+    console.log(`${vn.createdLabel} ${createdMatch[1]}`);
+
+    // 7. the close icon closes the pop-up
+    await E2ELocators.userNotesClose(this.page, title).click();
+    await expect(this.page.getByText(title, { exact: true }), `"${title}" pop-up should close`).toHaveCount(0, { timeout });
+    await expect(E2ELocators.usersRows(this.page).first(), 'Users table after closing the pop-up').toBeVisible({ timeout });
+    console.log(`"${title}" pop-up closed with the close icon`);
+
+  }
+  //new
+    async verifyUserShowKey(users, showKey, timeout = 15000) {
+    const sk = users.showKey;
+    const { row } = await this.#usersHoverActions(sk.row, users.rowActions, timeout);
+    await E2ELocators.userRowAction(row, sk.button).click();
+
+    // Pop-up opens
+    const dialog = E2ELocators.userKeyDialog(this.page, showKey.dialogTitle, showKey.closeButton);
+    await expect(dialog, `"${showKey.dialogTitle}" pop-up should open`).toBeVisible({ timeout });
+
+    // Key + expiry (the pop-up shows a spinner first, so poll until the key loads)
+    const keyRe = new RegExp(showKey.keyPattern);
+    await expect.poll(async () => keyRe.test(await dialog.innerText()), {
+      message: 'Authentication key and expiry should load', timeout,
+    }).toBe(true);
+    const m = (await dialog.innerText()).match(keyRe);
+    console.log(`Show Key pop-up: key=${m[1]}, ${m[2]}: ${m[3]}`);
+
+    // Content of the pop-up
+    await expect.soft(dialog.getByText(showKey.infoMessage.replace(/^Info:\s*/, ''), { exact: false })).toBeVisible();
+    await expect.soft(dialog.getByRole('button', { name: showKey.copyButton })).toBeVisible();
+    await expect.soft(dialog.getByRole('button', { name: showKey.regenerateButton })).toBeVisible();
+    await expect.soft(dialog.getByRole('button', { name: showKey.closeButton, exact: true })).toBeVisible();
+
+    // Click the cancel (X) icon
+    await E2ELocators.userKeyCancelIcon(dialog, sk.iconLabel).click();
+    await expect(dialog, 'Pop-up should close after clicking the X icon').toBeHidden({ timeout });
+    await this.page.waitForTimeout(sk.settleMs);
+    await expect(E2ELocators.usersRows(this.page).first(), 'Should stay on the Users page').toBeVisible({ timeout });
+  }
+    async verifyUserPagination(users, timeout = 15000) {
+    const pg = users.pagination;
+    const rowsPerPage = users.table.rowsPerPage;
+    const nav = E2ELocators.usersPagination(this.page, pg.paginationName);
+    const next = E2ELocators.usersPageButton(nav, pg.nextButton, false);
+    const prev = E2ELocators.usersPageButton(nav, pg.previousButton, false);
+    await nav.scrollIntoViewIfNeeded();
+    await expect(nav, 'Pagination should be visible').toBeVisible({ timeout });
+
+    const readRange = async () => {
+      const text = await E2ELocators.usersCount(this.page, users.table.bottomCountPattern).innerText();
+      const m = text.match(/(\d+)\s+to\s+(\d+)\s+of\s+(\d+)/);
+      return m ? { from: +m[1], to: +m[2], total: +m[3], text: text.trim() } : null;
+    };
+    const firstRow = async () => (await E2ELocators.usersRows(this.page).first().innerText()).replace(/\s+/g, ' ').trim();
+
+    // Checks that the footer shows the range of the page and that the table holds that many rows
+    const expectPage = async (p, label) => {
+      const { total } = await readRange();
+      const from = (p - 1) * rowsPerPage + 1;
+      const to = Math.min(p * rowsPerPage, total);
+      await expect.poll(async () => (await readRange())?.text, {
+        message: `${label}: footer should show users ${from} to ${to} of ${total}`, timeout,
+      }).toMatch(new RegExp(`Showing\\s+${from}\\s+to\\s+${to}\\s+of\\s+${total}`));
+      await expect(E2ELocators.usersRows(this.page), `${label}: rows on page ${p}`).toHaveCount(to - from + 1, { timeout });
+      const key = await firstRow();
+      console.log(`${label}: page ${p} -> "${(await readRange()).text}"`);
+      return key;
+    };
+
+    // Start state: page 1, "Previous" is disabled
+    const page1Key = await expectPage(1, 'Start');
+    await expect(prev, `"${pg.previousButton}" should be disabled on page 1`).toBeDisabled();
+
+    // 1. Next -> page 2
+    await next.click();
+    const page2Key = await expectPage(2, `"${pg.nextButton}"`);
+    expect(page2Key, 'Page 2 should show different users than page 1').not.toBe(page1Key);
+    await expect(prev, `"${pg.previousButton}" should be enabled on page 2`).toBeEnabled();
+
+    // 2. Previous -> back to page 1
+    await prev.click();
+    const backKey = await expectPage(1, `"${pg.previousButton}"`);
+    expect(backKey, 'Going back should show the same users as page 1 before').toBe(page1Key);
+
+    // 3. Click a page number
+    const { total } = await readRange();
+    const lastPage = Math.ceil(total / rowsPerPage);
+    expect(pg.jumpPage, `users.pagination.jumpPage must be between 1 and ${lastPage}`).toBeLessThanOrEqual(lastPage);
+    await E2ELocators.usersPageButton(nav, String(pg.jumpPage), true).click();
+    const jumpKey = await expectPage(pg.jumpPage, `Page ${pg.jumpPage}`);
+    expect(jumpKey, `Page ${pg.jumpPage} should show different users than page 1`).not.toBe(page1Key);
+    await this.page.waitForTimeout(pg.settleMs);
+  }
+//===============================================
+//product
+//===================================================
+   // =====================================================
+  // Products
+  // =====================================================
+  async verifyProductsPage(products, timeout = 15000) {
+    // page title
+    await expect(E2ELocators.productsPageTitle(this.page, products.pageTitle), `Page title "${products.pageTitle}"`).toBeVisible({ timeout });
+    console.log(`Page title shown: "${products.pageTitle}"`);
+
+    // "<number> assessments available · <number> active" (the numbers can be anything)
+    const re = new RegExp(products.countPattern);
+    const countText = E2ELocators.productsCount(this.page, products.countPattern);
+    await expect(countText, 'Products count statement should be shown').toBeVisible({ timeout });
+    const m = (await countText.innerText()).replace(/\s+/g, ' ').match(re);
+    expect(m, 'Count statement should match "<n> assessments available · <n> active"').not.toBeNull();
+    const available = Number(m[1]);
+    const active = Number(m[2]);
+    expect(Number.isInteger(available) && Number.isInteger(active), 'Both counts should be numbers').toBe(true);
+    expect.soft(active, 'Active count cannot be more than the available count').toBeLessThanOrEqual(available);
+    console.log(`Products count: "${m[0]}" -> available=${available}, active=${active}`);
+  }
+
+  async verifyProductsCardsAndDetails(products, timeout = 15000) {
+    const esc = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // 1. "All", "Active", "Available" tabs show a count
+    const counts = {};
+    for (const label of products.tabs) {
+      const tab = E2ELocators.productTab(this.page, esc(label), products.tabCountPattern);
+      await expect(tab, `"${label}" tab with its count`).toBeVisible({ timeout });
+      counts[label] = Number((await tab.innerText()).match(/\d+/)[0]);
+    }
+    console.log(`Product tabs: ${products.tabs.map((t) => `${t} ${counts[t]}`).join(' | ')}`);
+    const [allL, activeL, availL] = products.tabs;
+    expect.soft(counts[allL], `"${allL}" should equal "${activeL}" + "${availL}"`).toBe(counts[activeL] + counts[availL]);
+    const header = (await E2ELocators.productsCount(this.page, products.countPattern).innerText()).replace(/\s+/g, ' ').match(new RegExp(products.countPattern));
+    expect.soft(counts[allL], 'All tab should equal the "assessments available" number').toBe(Number(header[1]));
+    expect.soft(counts[activeL], 'Active tab should equal the "active" number').toBe(Number(header[2]));
+
+    // 2. every assessment card shows its name (each card is a button "View details for <name>")
+    const cards = E2ELocators.productCards(this.page, products.cardAction);
+    await expect.poll(() => cards.count(), { message: `All ${counts[allL]} assessment cards should load`, timeout }).toBe(counts[allL]);
+    const names = [];
+    const activeIdx = [];
+    for (let i = 0; i < counts[allL]; i++) {
+      const card = cards.nth(i);
+      const name = (await E2ELocators.productCardName(card).innerText()).trim();
+      expect.soft(name, `Card ${i + 1} should show a name`).toBeTruthy();
+      names.push(name);
+      if ((await E2ELocators.productCardBadge(card, products.activeBadge).count()) > 0) activeIdx.push(i);
+    }
+    expect.soft(new Set(names).size, 'Card names should be unique').toBe(names.length);
+    expect.soft(activeIdx.length, `Cards with the "${products.activeBadge}" badge should equal the "${activeL}" count`).toBe(counts[activeL]);
+    console.log(`----- ${names.length} assessment cards -----\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}`);
+
+    // 3. "View details" on an active card -> detail pop-up
+    const dt = products.detail;
+    expect(activeIdx.length, 'There should be at least one active card').toBeGreaterThan(dt.row);
+    const idx = activeIdx[dt.row];
+    const name = names[idx];
+    await cards.nth(idx).getByText(products.cardAction, { exact: true }).click();
+    const dialog = E2ELocators.productDialog(this.page, name, [dt.activeLine]);
+    await expect(dialog, `Detail pop-up for "${name}"`).toBeVisible({ timeout });
+    console.log(`Detail pop-up opened for "${name}"`);
+
+    // assessment name, time duration, Overview, Components, Detailed Description, Cognitive Areas
+    // Each detail may or may not be present: it is checked when shown and reported either way
+    const present = [];
+    const absent = [];
+    const check = async (label, locator) => ((await locator.count()) > 0 ? present : absent).push(label);
+    await check(dt.nameLabel, dialog.getByText(name, { exact: true }));
+    await check(dt.durationLabel, dialog.getByText(new RegExp(dt.durationPattern)));
+    for (const label of dt.labels) await check(label, E2ELocators.productDialogLabel(dialog, label));
+    if (present.includes(dt.durationLabel)) {
+      console.log(`${dt.durationLabel}: ${(await dialog.getByText(new RegExp(dt.durationPattern)).first().innerText()).trim()}`);
+    }
+    // the Cognitive Areas table is checked only when that section is shown
+    if (present.includes(dt.labels[dt.labels.length - 1])) {
+      for (const h of dt.cognitiveHeaders) {
+        await expect.soft(dialog.getByText(h, { exact: true }).first(), `Cognitive Areas column "${h}"`).toBeVisible();
+      }
+    }
+    console.log(`Pop-up details shown: ${present.join(', ') || 'none'}`);
+    console.log(`Pop-up details not shown (allowed): ${absent.join(', ') || 'none'}`);
+
+    // 4. "Active for your account" is shown for an active card
+    const activeLine = dialog.getByText(dt.activeLine, { exact: true });
+    await activeLine.scrollIntoViewIfNeeded();
+    await expect(activeLine, `"${dt.activeLine}" line`).toBeVisible({ timeout });
+    console.log(`"${dt.activeLine}" is shown for the active card "${name}"`);
+
+    // 5. click the close (X) icon -> the pop-up closes
+    await E2ELocators.productDialogClose(dialog, dt.closeIcon).click();
+    await expect(dialog, `Detail pop-up for "${name}" should close after clicking the X icon`).toBeHidden({ timeout });
+    await expect(cards.nth(idx), 'Products page should be shown again after closing the pop-up').toBeVisible({ timeout });
+    console.log(`Detail pop-up for "${name}" closed with the X icon`);
+  }
+   async verifyProductsTabFilters(products, timeout = 15000) {
+    const esc = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const [allL, activeL, availL] = products.tabs;
+    const cards = E2ELocators.productCards(this.page, products.cardAction);
+    const tabOf = (label) => E2ELocators.productTab(this.page, esc(label), products.tabCountPattern);
+    const countOf = async (label) => Number((await tabOf(label).innerText()).match(/\d+/)[0]);
+
+    // reads every card on screen: name, status badge, "View details" link, "Contact Sales" button
+    const readCards = async () => {
+      const list = [];
+      const n = await cards.count();
+      for (let i = 0; i < n; i++) {
+        const card = cards.nth(i);
+        list.push({
+          name: (await E2ELocators.productCardName(card).innerText()).trim(),
+          active: (await E2ELocators.productCardBadge(card, products.activeBadge).count()) > 0,
+          inactive: (await E2ELocators.productCardBadge(card, products.inactiveBadge).count()) > 0,
+          details: (await card.getByText(products.cardAction, { exact: true }).count()) > 0,
+          contact: (await E2ELocators.productContactSales(card, products.contactSales).count()) > 0,
+        });
+      }
+      return list;
+    };
+    const openTab = async (label) => {
+      const expected = await countOf(label);
+      await tabOf(label).click();
+      await expect(tabOf(label), `"${label}" tab should be selected`).toHaveAttribute('aria-selected', 'true', { timeout });
+      await expect.poll(() => cards.count(), { message: `"${label}" tab should list ${expected} assessments`, timeout }).toBe(expected);
+      return readCards();
+    };
+    const sameSet = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+
+    // baseline: the "All" tab
+    const all = await openTab(allL);
+    const activeNames = all.filter((c) => c.active).map((c) => c.name);
+    const inactiveNames = all.filter((c) => !c.active).map((c) => c.name);
+
+    // 1. "Active" tab: all the active assessment names
+    const active = await openTab(activeL);
+    expect.soft(active.every((c) => c.active), `Every card on the "${activeL}" tab should show the "${products.activeBadge}" badge`).toBe(true);
+    expect.soft(active.some((c) => c.contact), `No card on the "${activeL}" tab should show "${products.contactSales}"`).toBe(false);
+    expect.soft(sameSet(active.map((c) => c.name), activeNames), `"${activeL}" tab should list exactly the active assessments of the "${allL}" tab`).toBe(true);
+    console.log(`"${activeL}" tab (${active.length}):\n${active.map((c, i) => `${i + 1}. ${c.name}`).join('\n')}`);
+
+    // 2. "Available" tab: all the available (not active) assessment names, each with "Contact Sales"
+    const avail = await openTab(availL);
+    expect.soft(avail.some((c) => c.active), `No card on the "${availL}" tab should show the "${products.activeBadge}" badge`).toBe(false);
+    expect.soft(avail.every((c) => c.contact), `Every card on the "${availL}" tab should show "${products.contactSales}"`).toBe(true);
+    expect.soft(sameSet(avail.map((c) => c.name), inactiveNames), `"${availL}" tab should list exactly the inactive assessments of the "${allL}" tab`).toBe(true);
+    console.log(`"${availL}" tab (${avail.length}):\n${avail.map((c, i) => `${i + 1}. ${c.name}`).join('\n')}`);
+
+    // 3. "All" tab: "Contact Sales" only on inactive assessments, and only if there are any
+    const back = await openTab(allL);
+    expect.soft(back.length, `"${allL}" tab should list ${active.length} + ${avail.length} assessments`).toBe(active.length + avail.length);
+    const inactive = back.filter((c) => !c.active);
+    if (inactive.length > 0) {
+      for (const c of inactive) {
+        expect.soft(c.contact, `Inactive assessment "${c.name}" should show "${products.contactSales}"`).toBe(true);
+        expect.soft(c.details, `Inactive assessment "${c.name}" should not show "${products.cardAction}"`).toBe(false);
+      }
+      console.log(`"${allL}" tab: ${inactive.length} inactive assessment(s) show "${products.contactSales}": ${inactive.map((c) => c.name).join(', ')}`);
+    } else {
+      expect.soft(back.some((c) => c.contact), `No inactive assessment, so no "${products.contactSales}" should be shown`).toBe(false);
+      console.log(`"${allL}" tab: no inactive assessment present, so no "${products.contactSales}" is shown`);
+    }
+    for (const c of back.filter((x) => x.active)) {
+      expect.soft(c.contact, `Active assessment "${c.name}" should not show "${products.contactSales}"`).toBe(false);
+    }
+  } 
+    async verifyProductsSearch(products, timeout = 15000) {
+    const sc = products.search;
+    const esc = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const allLabel = products.tabs[0];
+    const cards = E2ELocators.productCards(this.page, products.cardAction);
+    const box = E2ELocators.productSearchBox(this.page, sc.boxName);
+    const settle = () => this.page.waitForTimeout(sc.settleMs);
+    const allCount = Number((await E2ELocators.productTab(this.page, esc(allLabel), products.tabCountPattern).innerText()).match(/\d+/)[0]);
+    const expectAllCards = async (what) => {
+      await expect(box, `Search box should be empty ${what}`).toHaveValue('', { timeout });
+      await expect.poll(() => cards.count(), { message: `All ${allCount} assessments should be listed ${what}`, timeout }).toBe(allCount);
+    };
+    await expect(box, 'Search box').toBeVisible({ timeout });
+
+    // 1. invalid data -> "No results for ..."
+    await box.fill(sc.invalidTerm);
+    const noResults = E2ELocators.productNoResults(this.page, sc.noResultsText, sc.invalidTerm);
+    await expect(noResults, `"${sc.noResultsText} ${sc.invalidTerm}" message`).toBeVisible({ timeout });
+    await expect(this.page.getByText(sc.noResultsHint, { exact: true }), `"${sc.noResultsHint}" hint`).toBeVisible();
+    await expect(cards, 'No assessment card should be listed for an invalid search').toHaveCount(0);
+    console.log(`Invalid search "${sc.invalidTerm}": "${(await noResults.innerText()).trim()}"`);
+
+    // 2. "Reset filters" -> the search is cleared and all assessments are listed again
+    await E2ELocators.productResetFilters(this.page, sc.resetLink).click();
+    await expect(noResults, 'No-results message should go away after reset').toBeHidden({ timeout });
+    await expectAllCards(`after "${sc.resetLink}"`);
+    console.log(`"${sc.resetLink}" cleared the search; ${allCount} assessments listed again`);
+
+    // 3. valid data -> matching assessments
+    await box.fill(sc.validTerm);
+    await expect.poll(() => cards.count(), { message: `Search "${sc.validTerm}" should narrow the list`, timeout }).toBeLessThan(allCount);
+    const found = await cards.count();
+    expect(found, `Search "${sc.validTerm}" should show at least one assessment`).toBeGreaterThan(0);
+    const names = [];
+    for (let i = 0; i < found; i++) {
+      const card = cards.nth(i);
+      const text = (await card.innerText()).toLowerCase();
+      expect.soft(text.includes(sc.validTerm.toLowerCase()), `Result ${i + 1} should match "${sc.validTerm}"`).toBe(true);
+      names.push((await E2ELocators.productCardName(card).innerText()).trim());
+    }
+    console.log(`Valid search "${sc.validTerm}" (${found}): ${names.join(' | ')}`);
+
+    // 4. cross icon in the search bar -> search cleared, all assessments listed
+    await settle();
+    await E2ELocators.productSearchClear(box, sc.clearIcon).click();
+    await expectAllCards('after clicking the cross icon');
+    console.log(`Cross icon cleared the search; ${allCount} assessments listed again`);
+  }
+  // =====================================================
+  // Profile
+  // =====================================================
+  // 1. click the Profile menu
+  async clickProfileMenu(profile, timeout = 15000) {
+    const menu = E2ELocators.profileMenu(this.page, profile.menuName);
+    await expect(menu, `"${profile.menuName}" menu`).toBeVisible({ timeout });
+    await menu.click();
+  }
+
+  // 2. the Profile page opens and shows its title and the statement
+  async verifyProfileScreen(profile, timeout = 15000) {
+    await expect(this.page, 'Profile page URL').toHaveURL(new RegExp(profile.urlPattern), { timeout });
+    await expect(E2ELocators.profilePageTitle(this.page, profile.pageTitle), `Page title "${profile.pageTitle}"`).toBeVisible({ timeout });
+    console.log(`Page title shown: "${profile.pageTitle}"`);
+    await expect(E2ELocators.profileSubtitle(this.page, profile.subtitle), `"${profile.subtitle}" statement`).toBeVisible({ timeout });
+    console.log(`Statement shown: "${profile.subtitle}"`);
+  }
+    async verifyProfileTabs(profile, timeout = 15000) {
+    const tabs = profile.tabs;
+    const tabOf = (name) => E2ELocators.profileTab(this.page, name);
+
+    // These tabs have no aria-selected or "active" class, so the selected tab is the one
+    // whose look (text colour / underline / weight) differs from the other tabs.
+    const signature = (name) => tabOf(name).evaluate((el) => {
+      const s = getComputedStyle(el);
+      return [s.color, s.borderBottomColor, s.borderBottomWidth, s.fontWeight].join('|');
+    });
+    const selectedNames = async () => {
+      const sigs = {};
+      for (const t of tabs) sigs[t.name] = await signature(t.name);
+      const tally = {};
+      Object.values(sigs).forEach((s) => { tally[s] = (tally[s] || 0) + 1; });
+      const common = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
+      return tabs.filter((t) => sigs[t.name] !== common).map((t) => t.name);
+    };
+
+    // the tab "name" is the only selected tab, and only its content is shown
+    const expectOnly = async (name, what) => {
+      await expect.poll(selectedNames, { message: `Only the "${name}" tab should be selected ${what}`, timeout }).toEqual([name]);
+      const current = tabs.find((t) => t.name === name);
+      for (const text of current.contents) {
+        await expect.soft(E2ELocators.profileText(this.page, text), `"${text}" should be shown on the "${name}" tab`).toBeVisible({ timeout });
+      }
+      for (const other of tabs.filter((t) => t.name !== name)) {
+        await expect.soft(E2ELocators.profileText(this.page, other.heading), `"${other.heading}" (${other.name} tab) should not be shown on the "${name}" tab`).toHaveCount(0);
+      }
+    };
+
+    // 1. all tabs are displayed
+    for (const t of tabs) {
+      await expect(tabOf(t.name), `"${t.name}" tab`).toBeVisible({ timeout });
+    }
+    console.log(`Profile tabs shown: ${tabs.map((t) => t.name).join(' | ')}`);
+
+    // 2. "Information" is the default tab (selected on load)
+    await expectOnly(profile.defaultTab, 'on load');
+    console.log(`"${profile.defaultTab}" is the default tab`);
+
+    // 3. click each tab -> its own content loads
+    for (const t of tabs) {
+      await tabOf(t.name).click();
+      await expectOnly(t.name, 'after clicking it');
+      console.log(`"${t.name}" tab: ${t.contents.join(' | ')}`);
+    }
+  }
 }
