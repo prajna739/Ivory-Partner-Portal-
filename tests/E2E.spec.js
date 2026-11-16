@@ -291,5 +291,10 @@ test.describe('Ivory-PartnerLogin', () => {
     await profile.verifyProfileScreen(e2eData.profile, e2eData.profile.loadTimeoutMs);
       // 3. The four tabs: displayed, "Information" selected by default, each tab loads its own content
     await profile.verifyProfileTabs(e2eData.profile, e2eData.profile.loadTimeoutMs);
-  });
+      await profile.verifyProfileInformation(e2eData.profile, loginData.validEmail, e2eData.profile.loadTimeoutMs);
+      await profile.verifyProfilePreferences(e2eData.profile, e2eData.profile.loadTimeoutMs);
+    await profile.verifyProfileAssessments(e2eData.profile, e2eData.profile.loadTimeoutMs);
+      await profile.verifyProfileNotifications(e2eData.profile, e2eData.profile.loadTimeoutMs);
+
+    });
 });

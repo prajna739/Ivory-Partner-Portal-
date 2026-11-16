@@ -1,7 +1,6 @@
-// Pattern used to detect the "active" state. Change it in one place if your app uses a different class name.
+
 export const ACTIVE_TAB_PATTERN = /active|selected|current|highlight/i;
 
-// Escapes text so a label can safely be used inside a RegExp
 export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export const E2ELocators = {
@@ -29,7 +28,7 @@ export const E2ELocators = {
     dashboardCardValue: (page, label) =>
         E2ELocators.dashboardCardLabel(page, label).locator('xpath=..').getByRole('definition'),
 
-    // Trend chart. The card is the innermost container holding both the title and the legend.
+    
     chartCard: (page, title, legendText) =>
         page.locator('div')
             .filter({ has: page.getByRole('heading', { name: title, exact: true }) })
@@ -42,12 +41,10 @@ export const E2ELocators = {
     chartTooltip: (page, card) =>
         card.locator('[role="tooltip"], [class*="tooltip" i]').or(page.getByRole('tooltip')),
 
-    // Period dropdown (found by one of its options) and the loading message
     trendPeriodSelect: (page, optionLabel) =>
         page.getByRole('combobox').filter({ has: page.locator('option', { hasText: optionLabel }) }),
     trendChartLoading: (page, loadingText) => page.getByText(loadingText, { exact: true }),
 
-    // Recently Completed Assessments card = innermost container holding its heading AND its "view all" button
     recentCompletedCard: (page, title, viewAllText) =>
         page.locator('div')
             .filter({ has: page.getByRole('heading', { name: title, exact: true }) })
@@ -55,7 +52,6 @@ export const E2ELocators = {
             .last(),
     recentCompletedTitle: (card, title) => card.getByRole('heading', { name: title, exact: true }),
 
-    //"View all completed assessments →" button inside the card (name matches as a substring, so the arrow is covered)
     recentCompletedViewAll: (card, viewAllText) => card.getByRole('button', { name: viewAllText }),
 
     // Assessments page
@@ -67,11 +63,8 @@ export const E2ELocators = {
   //----------------------------
   
     assessmentsPageTitle: (page, title) => page.getByRole('heading', { name: title, exact: true }),
-        // Assessments page - Show / Hide Filters
-    // One button whose name swaps between "Show Filters" and "Hide Filters"
     filterToggle: (page, buttonName) => page.getByRole('button', { name: buttonName, exact: true }),
     filterPanelTitle: (page, title) => page.getByText(title, { exact: true }),
-    // Panel = innermost container holding the panel title AND its "Reset Filters" button
     filterPanel: (page, title, resetText) =>
         page.locator('div')
             .filter({ has: page.getByText(title, { exact: true }) })
@@ -79,31 +72,27 @@ export const E2ELocators = {
             .last(),
     filterPanelControl: (panel, label) => panel.getByText(label, { exact: true }).first(),
     filterPanelReset: (panel, resetText) => panel.getByRole('button', { name: resetText, exact: true }),
-   // Filter controls are found from their visible label
 
 filterSelect: (panel, label) => panel.getByRole('combobox', { name: label, exact: true }),
 filterDateInput: (panel, label) => panel.getByRole('textbox', { name: label, exact: true }),
 assessmentRows: (page) => page.locator('tbody tr'),
 noResultsMessage: (page, text) => page.getByText(text, { exact: true }),
 bottomCount: (page, pattern) => page.getByText(new RegExp(pattern)),
-// ---------- Assessments page: search box and pagination ----------
 searchBox: (page, name) => page.getByRole('textbox', { name, exact: true }),
 searchClear: (page, text) => page.getByRole('button', { name: text, exact: true }),   // exact: does not match "Clear Filters"
 paginationButton: (page, navName, number) =>
 page.getByRole('navigation', { name: navName }).getByRole('button', { name: String(number), exact: true }),
-       // "Clear Filters" button at the top of the page (exact name, so it never matches the search box's "Clear")
 clearAllFilters: (page, text) => page.getByRole('button', { name: text, exact: true }),
-    // Notes page
-    notesPageText: (page, text) => page.getByText(text, { exact: true }),
-    noteDetailRow: (page, label) => page.locator('div').filter({ has: page.getByText(label, { exact: true }) }).last(),
-    noteTextBox: (page, placeholder) => page.getByPlaceholder(placeholder),
-    noteCard: (page, text) => page.locator('p').filter({ hasText: new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }).locator('xpath=..'),
+
+notesPageText: (page, text) => page.getByText(text, { exact: true }),
+noteDetailRow: (page, label) => page.locator('div').filter({ has: page.getByText(label, { exact: true }) }).last(),
+noteTextBox: (page, placeholder) => page.getByPlaceholder(placeholder),
+noteCard: (page, text) => page.locator('p').filter({ hasText: new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }).locator('xpath=..'),
     //---------------------------------------------------
     //user locater
     //--------------------------------------------------------------
     
     usersPageTitle: (page, title) => page.getByRole('heading', { name: title, exact: true }),
-    // Users page stat card: the innermost block whose text is exactly "<label> <value>" (the value pattern comes from the data file)
     usersCardLabel: (page, label) => page.getByText(label, { exact: true }).first(),
     usersCard: (page, label, valuePattern) =>
         page.locator('div')
@@ -120,13 +109,11 @@ clearAllFilters: (page, text) => page.getByRole('button', { name: text, exact: t
             .filter({ has: page.getByRole('button', { name: cancelName, exact: true }) })
             .last(),
     editUserCancel: (dialog, name) => dialog.getByRole('button', { name, exact: true }),
-    // the X icon: a button named "Close", otherwise the first button in the pop-up
     editUserClose: (dialog, name) => dialog.getByRole('button', { name }).or(dialog.locator('button').first()).first(),
 
     backToUsers: (page, text) =>
         page.getByRole('link', { name: text }).or(page.getByRole('button', { name: text })).first(),
 
-    // Users page: "Notes for <user>" pop-up. The X icon is the button in the same header row as the pop-up title; a note card holds the note text and its "Created:" line
     userNotesClose: (page, title) =>
         page.getByText(title, { exact: true }).first().locator('xpath=ancestor::*[.//button][1]').getByRole('button').first(),
     userNoteCard: (page, text, createdLabel) =>
@@ -141,7 +128,6 @@ userKeyCancelIcon: (dialog, name) => dialog.getByRole('button', { name }).or(dia
 //==============================
 //product page locaters
 //===============================
-  // ---- Products ----
   productsPageTitle: (page, name) => page.getByRole('heading', { name, exact: true }),
   productsCount: (page, pattern) => page.getByText(new RegExp(pattern)).first(),
   productTab: (page, label, countPattern) => page.locator('button').filter({ hasText: new RegExp(`^\\s*${label}${countPattern}\\s*$`) }).first(),
@@ -160,10 +146,35 @@ userKeyCancelIcon: (dialog, name) => dialog.getByRole('button', { name }).or(dia
 //==========================================
 //profile locater
 //==========================================
-    // ---- Profile ----
+    
     profileMenu: (page, name) => page.getByRole('link', { name, exact: true }),
     profilePageTitle: (page, name) => page.getByRole('heading', { name, exact: true }),
     profileSubtitle: (page, text) => page.getByText(text, { exact: true }),
         profileTab: (page, name) => page.getByRole('tab', { name }).or(page.getByRole('button', { name })).first(),
     profileText: (page, text) => page.getByText(text, { exact: true }).first(),
+  profileField: (page, label) => page.getByText(label, { exact: true }).first().locator('xpath=..'),
+  profileButton: (page, name) => page.getByRole('button', { name, exact: true }).or(page.getByText(name, { exact: true })).first(),
+  profileInput: (page, label) => page.getByText(label, { exact: true }).first().locator('xpath=following::input[1]'),
+  
+  profileText: (page, text) => page.getByText(text, { exact: true }).first(),
+  profileTextRe: (page, re) => page.getByText(re).first(),
+  // hidden <input role="switch"> (used to read ON/OFF)
+  profileToggle: (page, title) => page.getByText(title, { exact: true }).first()
+    .locator("xpath=ancestor::*[.//*[@role='switch' or @type='checkbox'] or .//button][1]")
+    .locator("[role='switch'], input[type='checkbox'], button").first(),
+  // visible switch track (used to check visibility and to click)
+  profileToggleTrack: (page, title) => {
+    const input = E2ELocators.profileToggle(page, title);
+    return input.locator('xpath=following-sibling::label[1]')
+      .or(input.locator("xpath=ancestor::*[contains(@class,'Switch-root')][1]//label")).first();
+  },
+  profileToast: (page, message) => page.getByText(message, { exact: true }).first(),
+
+    profileIcon: (page, title) => {
+    const t = page.getByText(title, { exact: true }).first();
+    return t.locator('svg').or(t.locator('xpath=..').locator('svg')).first();
+  },
+  profilePlaceholder: (page, placeholder) => page.getByPlaceholder(placeholder).first(),
+  profileRowDelete: (page, text) => page.getByText(text, { exact: true }).first()
+    .locator('xpath=ancestor::*[.//button][1]').locator('button').first(),
 }

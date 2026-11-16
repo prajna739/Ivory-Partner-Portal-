@@ -554,9 +554,8 @@
     "pageTitle": "Profile",
     "subtitle": "View and manage your profile and workspace settings",
     "loadTimeoutMs": 15000,
-    "testTimeoutMs": 120000,
+    "testTimeoutMs": 300000,
     "defaultTab": "Information",
-    "selectedClassPattern": "active|selected|current",
     "tabs": [
       {
         "name": "Information",
@@ -596,6 +595,93 @@
           "Enable Notifications"
         ]
       }
-    ]
+    ],
+    "information": {
+      "tabName": "Information",
+      "sections": [
+        "User Information",
+        "Current Workspace"
+      ],
+      "nameLabel": "Name",
+      "emailLabel": "Email",
+      "emailPattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+      "workspaceFields": [
+        "Partner Name",
+        "Partner Email",
+        "Phone Number"
+      ],
+      "emptyValueText": "(empty)"
+    },
+    "preferences": {
+      "tabName": "Preferences",
+      "sectionTitle": "Report Settings",
+      "fields": [
+        {
+          "label": "Signer Name",
+          "newValue": "prajna k"
+        },
+        {
+          "label": "Signer Designation",
+          "newValue": "qa"
+        }
+      ],
+      "editButton": "Edit",
+      "saveButton": "Save",
+      "cancelButton": "Cancel",
+      "cancelProbeValue": "cancel-check",
+      "emptyValueText": "(empty)"
+    },
+    "assessments": {
+      "tabName": "Assessments",
+      "toastTitle": "Success",
+      "toastTimeoutMs": 12000,
+      "toggleOnMinSaturation": 0.3,
+      "reminders": [
+        {
+          "title": "Assessment Reminders",
+          "description": "Send a one-time reminder to users who haven't attended the assessment.",
+          "helper": "Runs automatically the next day at 9 AM if enabled.",
+          "toastMessage": "Assessment reminder settings updated successfully",
+          "finalState": "on"
+        },
+        {
+          "title": "7th Day Reminder",
+          "description": "Send a follow-up reminder on the 7th day to users who still haven't attended the assessment.",
+          "helper": "Runs automatically on the 7th day at 9 AM if enabled.",
+          "toastMessage": "7th day assessment reminder settings updated successfully",
+          "finalState": "off"
+        }
+      ]
+    },
+    "notifications": {
+      "tabName": "Notifications",
+      "title": "Enable Notifications",
+      "description": "Enable or disable all notification alerts",
+      "onSection": {
+        "title": "Notify me on",
+        "description": "Add phone numbers to receive WhatsApp notifications",
+        "badge": "Only delivery method",
+        "phonePlaceholder": "Enter 10 digit number",
+        "addButton": "Add",
+        "formatHint": "Expected format: +91 followed by 10 digits",
+        "defaultNumber": "+919843326118",
+        "info": "WhatsApp notifications will be sent to the numbers listed above when assessments are completed."
+      },
+      "whenSection": {
+        "title": "Notify me when",
+        "description": "Select when you want to receive a notification",
+        "options": [
+          {
+            "title": "On Assessment Completed",
+            "description": "Get notified when a user finishes their assessment"
+          }
+        ]
+      },
+      "saveButton": "Save Changes",
+      "cancelButton": "Cancel",
+      "toastTitle": "Success",
+      "toastMessage": "Notification settings saved successfully!",
+      "toastTimeoutMs": 12000
+    }
   }
 }

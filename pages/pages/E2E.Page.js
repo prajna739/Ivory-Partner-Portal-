@@ -1345,7 +1345,7 @@ async verifyAssessmentsPageTitle(title, timeout) {
     expect.soft(total, `${label}: adding a date can only narrow the results (without date: ${typeStatusTotal})`).toBeLessThanOrEqual(typeStatusTotal);
     return total;
   }
-   // ---------- NEW: Assessments page stat cards (Total, Assigned, In-Process, Completed) ----------
+   // ----------  Assessments page stat cards (Total, Assigned, In-Process, Completed) ----------
 
   // 1. Every card shows its label and a count (any number; the page first shows "..." while loading, so this waits)
   async verifyAssessmentCards(cards, timeout) {
@@ -1425,7 +1425,7 @@ async verifyAssessmentsPageTitle(title, timeout) {
     await this.verifyAssessmentsPageTitle(ap.pageTitle, ap.loadTimeoutMs);
     await this.verifyAssessmentCards(ap.cards, ap.loadTimeoutMs);
   }
-    // ---------- NEW: Assessment search ----------
+    // ----------  Assessment search ----------
 
   #searchBox(sb) {
     expect(sb, 'assessmentSearch is missing in E2EData.json').toBeDefined();
@@ -1525,7 +1525,7 @@ async verifyAssessmentsPageTitle(title, timeout) {
     await box.fill('');
     await this.#settledResults(ap, fp);
   }
-      // ---------- NEW: Type + Status + Search + Date, then "Clear Filters" and "Reset Filters" ----------
+      // ----------  Type + Status + Search + Date, then "Clear Filters" and "Reset Filters" ----------
 
   // 2-3. Select a type, then a status, then search by name, then add a dates; each step shows results or the message
   async verifyTypeStatusSearchAndDate(ap, fp, sb, fl) {
@@ -1606,7 +1606,7 @@ async verifyAssessmentsPageTitle(title, timeout) {
 
     console.log(`"${fl.clearAllButton}": type, status, dates and search cleared, total back to ${expectedTotal}`);
   }
-   // ---------- NEW: assessment table (headers, rows per page, phone format, dates) ----------
+   // ----------  assessment table (headers, rows per page, phone format, dates) ----------
 
   async #tableColumn(tb, name) {
     const headers = (await this.page.locator('thead th').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim().toLowerCase());
@@ -1665,7 +1665,7 @@ async verifyAssessmentsPageTitle(title, timeout) {
     }
     console.log(`Phone format and both dates verified on ${count} rows`);
   }
-    // ---------- NEW: default sort order (Latest first) ----------
+    // ----------  default sort order (Latest first) ----------
 
   // Run on a freshly loaded Assessments page, before any filter, search or sort click
   async verifyDefaultSortOrder(ap, tb) {
@@ -1742,7 +1742,7 @@ async verifyAssessmentsPageTitle(title, timeout) {
       expect.soft(new Set(dirs), `Sort ${b.label}: both ascending and descending should work (got ${dirs.join(', ')})`).toEqual(new Set(['asc', 'desc']));
     }
   }
-    // ---------- NEW: hover the three dots (row actions) ----------
+    // ----------  hover the three dots (row actions) ----------
 
   // The row action button, or its "already used" twin (ra.alternatives), e.g. "Notify User" / "User Notified"
   #actionButton(row, ra, name) {
@@ -1980,7 +1980,7 @@ async verifyAssessmentsPageTitle(title, timeout) {
     await this.verifyAssessmentsPageTitle(ap.pageTitle, ap.loadTimeoutMs);
   }
 
-  // ---------- NEW: Notify User (enabled -> success pop-up, disabled -> "send next reminder tomorrow" message) ----------
+  // ----------  Notify User (enabled -> success pop-up, disabled -> "send next reminder tomorrow" message) ----------
 
   // Move the mouse away first so the row is collapsed, then hover its three dots
   async #hoverRowActions(row, actionsIdx, settleMs) {
@@ -2069,7 +2069,7 @@ async verifyAssessmentsPageTitle(title, timeout) {
     console.log(`Notify User: ${sent} notification(s) sent, ${alreadyNotified} already notified, ${wanted.length} row(s) checked`);
   }
 
-  // ---------- NEW: Show Key flow (hover three dots -> Show Key -> expired / active pop-up) ----------
+  // ----------  Show Key flow (hover three dots -> Show Key -> expired / active pop-up) ----------
 
   #escRe(v) {
     return String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2885,7 +2885,7 @@ async verifyUserSorting(sort, timeout) {
     console.log(`"${title}" pop-up closed with the close icon`);
 
   }
-  //new
+  
     async verifyUserShowKey(users, showKey, timeout = 15000) {
     const sk = users.showKey;
     const { row } = await this.#usersHoverActions(sk.row, users.rowActions, timeout);
@@ -3250,5 +3250,259 @@ async verifyUserSorting(sort, timeout) {
       await expectOnly(t.name, 'after clicking it');
       console.log(`"${t.name}" tab: ${t.contents.join(' | ')}`);
     }
+  }
+    async verifyProfileInformation(profile, loginEmail, timeout = 15000) {
+    const info = profile.information;
+
+    // value of a field = text of its row without the label
+    const valueOf = async (label) => {
+      const row = E2ELocators.profileField(this.page, label);
+      await expect(row, `"${label}" field`).toBeVisible({ timeout });
+      const raw = await row.innerText();
+      return raw.replace(label, '').replace(/\s+/g, ' ').trim();
+    };
+
+    // 1. click the Information tab
+    await E2ELocators.profileTab(this.page, info.tabName).click();
+    console.log(`Clicked "${info.tabName}" tab`);
+
+    // 1. both sections are displayed
+    for (const section of info.sections) {
+      await expect(E2ELocators.profileText(this.page, section), `"${section}" section`).toBeVisible({ timeout });
+    }
+    console.log(`Sections shown: ${info.sections.join(' | ')}`);
+
+    // 2. name is displayed
+    await expect.poll(() => valueOf(info.nameLabel), { message: `"${info.nameLabel}" value should be displayed`, timeout }).not.toBe('');
+    console.log(`${info.nameLabel}: ${await valueOf(info.nameLabel)}`);
+
+    // 3. email is displayed, valid, and equals the login email
+    await expect.poll(() => valueOf(info.emailLabel), { message: `"${info.emailLabel}" value should be displayed`, timeout }).not.toBe('');
+    const email = await valueOf(info.emailLabel);
+    expect.soft(email, `"${info.emailLabel}" should look like an email`).toMatch(new RegExp(info.emailPattern));
+    expect(email.toLowerCase(), `Profile email should equal the login email "${loginEmail}"`).toBe(loginEmail.toLowerCase());
+    console.log(`${info.emailLabel}: ${email} (matches login email)`);
+
+    // 4. workspace fields are displayed -> print values
+    for (const label of info.workspaceFields) {
+      const value = await valueOf(label);
+      console.log(`${label}: ${value || info.emptyValueText}`);
+    }
+  }
+    async verifyProfilePreferences(profile, timeout = 15000) {
+    const pref = profile.preferences;
+    const edit = () => E2ELocators.profileButton(this.page, pref.editButton);
+
+    // read-only value of a field = text of its row without the label
+    const valueOf = async (label) => {
+      const row = E2ELocators.profileField(this.page, label);
+      await expect(row, `"${label}" field`).toBeVisible({ timeout });
+      return (await row.innerText()).replace(label, '').replace(/\s+/g, ' ').trim();
+    };
+    const expectValues = async (expected, what) => {
+      for (const f of pref.fields) {
+        await expect.poll(() => valueOf(f.label), { message: `"${f.label}" should be "${expected[f.label]}" ${what}`, timeout }).toBe(expected[f.label]);
+      }
+    };
+    const openEdit = async () => {
+      await edit().click();
+      for (const f of pref.fields) {
+        await expect(E2ELocators.profileInput(this.page, f.label), `"${f.label}" input in edit mode`).toBeVisible({ timeout });
+      }
+      await expect(E2ELocators.profileButton(this.page, pref.saveButton), `"${pref.saveButton}" button`).toBeVisible({ timeout });
+      await expect(E2ELocators.profileButton(this.page, pref.cancelButton), `"${pref.cancelButton}" button`).toBeVisible({ timeout });
+    };
+
+    // 1. click the Preferences tab
+    await E2ELocators.profileTab(this.page, pref.tabName).click();
+    await expect(E2ELocators.profileText(this.page, pref.sectionTitle), `"${pref.sectionTitle}" section`).toBeVisible({ timeout });
+    console.log(`Clicked "${pref.tabName}" tab`);
+
+    // 2. signer name and designation are displayed
+    for (const f of pref.fields) {
+      console.log(`${f.label}: ${(await valueOf(f.label)) || pref.emptyValueText}`);
+    }
+
+    // 3. edit icon is shown
+    await expect(edit(), `"${pref.editButton}" icon`).toBeVisible({ timeout });
+    console.log(`"${pref.editButton}" icon is shown`);
+
+    // 4. edit name and designation, then save
+    await openEdit();
+    const saved = {};
+    for (const f of pref.fields) {
+      await E2ELocators.profileInput(this.page, f.label).fill(f.newValue);
+      saved[f.label] = f.newValue;
+    }
+    await E2ELocators.profileButton(this.page, pref.saveButton).click();
+    await expect(edit(), `Back to view mode after "${pref.saveButton}"`).toBeVisible({ timeout });
+    await expectValues(saved, `after "${pref.saveButton}"`);
+    console.log(`Saved: ${pref.fields.map((f) => `${f.label} = "${f.newValue}"`).join(' | ')}`);
+
+    // 5. edit icon -> type something -> Cancel -> nothing changes
+    await openEdit();
+    await E2ELocators.profileInput(this.page, pref.fields[0].label).fill(pref.cancelProbeValue);
+    await E2ELocators.profileButton(this.page, pref.cancelButton).click();
+    await expect(edit(), `Back to view mode after "${pref.cancelButton}"`).toBeVisible({ timeout });
+    await expectValues(saved, `after "${pref.cancelButton}"`);
+    console.log(`"${pref.cancelButton}" discarded the change; values unchanged`);
+  }
+    async verifyProfileAssessments(profile, timeout = 15000) {
+    const cfg = profile.assessments;
+
+    // text match that tolerates straight or curly apostrophes
+    const looseText = (text) => new RegExp(
+      '^\\s*' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/['’]/g, "['’]") + '\\s*$'
+    );
+
+    // is the toggle ON? (read from the hidden input; colour is only a fallback)
+    const isOn = (title) => E2ELocators.profileToggle(this.page, title).evaluate((el, minSat) => {
+      const a = el.getAttribute('aria-checked');
+      if (a !== null) return a === 'true';
+      if (el.type === 'checkbox') return el.checked;
+      const inp = el.querySelector('input[type=checkbox]');
+      if (inp) return inp.checked;
+      const ds = el.getAttribute('data-state');
+      if (ds) return ['checked', 'on', 'active'].includes(ds);
+      for (const n of [el, ...el.querySelectorAll('*')]) {
+        const m = getComputedStyle(n).backgroundColor.match(/rgba?\(([^)]+)\)/);
+        if (!m) continue;
+        const [r, g, b, al = 1] = m[1].split(',').map((v) => parseFloat(v));
+        if (al === 0) continue;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        return max === 0 ? false : (max - min) / max >= minSat;
+      }
+      return false;
+    }, cfg.toggleOnMinSaturation);
+
+    // click the toggle once, check it flipped and the success pop-up is shown
+    const toggleOnce = async (reminder, expectOn) => {
+      const toast = E2ELocators.profileToast(this.page, reminder.toastMessage);
+      await expect(toast, `Previous "${reminder.title}" pop-up should be gone`).toHaveCount(0, { timeout: cfg.toastTimeoutMs });
+      await E2ELocators.profileToggleTrack(this.page, reminder.title).click();
+      await expect.poll(() => isOn(reminder.title), { message: `"${reminder.title}" should be ${expectOn ? 'ON' : 'OFF'}`, timeout }).toBe(expectOn);
+      await expect(E2ELocators.profileText(this.page, cfg.toastTitle), `"${cfg.toastTitle}" pop-up title`).toBeVisible({ timeout });
+      await expect(toast, `"${reminder.title}" pop-up "${reminder.toastMessage}"`).toBeVisible({ timeout });
+      console.log(`"${reminder.title}" turned ${expectOn ? 'ON' : 'OFF'} -> pop-up: ${cfg.toastTitle} - ${reminder.toastMessage}`);
+    };
+
+    // 1. click the Assessments tab
+    await E2ELocators.profileTab(this.page, cfg.tabName).click();
+    console.log(`Clicked "${cfg.tabName}" tab`);
+
+    // 2. titles, descriptions and helper text of both reminders
+    for (const r of cfg.reminders) {
+      for (const [what, text] of [['title', r.title], ['description', r.description], ['helper text', r.helper]]) {
+        await expect(E2ELocators.profileTextRe(this.page, looseText(text)), `"${r.title}" ${what}: "${text}"`).toBeVisible({ timeout });
+      }
+      await expect(E2ELocators.profileToggleTrack(this.page, r.title), `"${r.title}" toggle`).toBeVisible({ timeout });
+      console.log(`${r.title}: "${r.description}" | "${r.helper}"`);
+    }
+
+    // 3 & 4. each toggle can be switched off and on, with a success pop-up every time
+    for (const r of cfg.reminders) {
+      const start = await isOn(r.title);
+      console.log(`"${r.title}" starts ${start ? 'ON' : 'OFF'}`);
+      await toggleOnce(r, !start);
+      await toggleOnce(r, start);
+      const wantOn = r.finalState === 'on';
+      if (start !== wantOn) await toggleOnce(r, wantOn);
+      console.log(`"${r.title}" left ${wantOn ? 'ON' : 'OFF'}`);
+    }
+  }
+
+    async verifyProfileNotifications(profile, timeout = 15000) {
+    const n = profile.notifications;
+    const on = n.onSection;
+    const when = n.whenSection;
+    const text = (t) => E2ELocators.profileText(this.page, t);
+    const save = () => E2ELocators.profileButton(this.page, n.saveButton);
+    const cancel = () => E2ELocators.profileButton(this.page, n.cancelButton);
+    const toast = () => E2ELocators.profileToast(this.page, n.toastMessage);
+
+    // hidden <input role="switch"> carries the state; the visible track is clicked
+    const isOn = (title) => E2ELocators.profileToggle(this.page, title).evaluate((el) => {
+      const a = el.getAttribute('aria-checked');
+      return a !== null ? a === 'true' : !!el.checked;
+    });
+    const flip = (title) => E2ELocators.profileToggleTrack(this.page, title).click();
+
+    const sectionTexts = [on.title, on.description, on.badge, on.formatHint, on.defaultNumber, on.info,
+      when.title, when.description, ...when.options.flatMap((o) => [o.title, o.description])];
+
+    // all "Notify me on" / "Notify me when" content visible (true) or gone (false)
+    const expectSections = async (visible, what) => {
+      for (const t of sectionTexts) {
+        if (visible) await expect.soft(text(t), `"${t}" should be shown ${what}`).toBeVisible({ timeout });
+        else await expect.soft(text(t), `"${t}" should not be shown ${what}`).toHaveCount(0, { timeout });
+      }
+      if (visible) {
+        await expect.soft(E2ELocators.profilePlaceholder(this.page, on.phonePlaceholder), `Phone field "${on.phonePlaceholder}" ${what}`).toBeVisible({ timeout });
+        await expect.soft(E2ELocators.profileButton(this.page, on.addButton), `"${on.addButton}" button ${what}`).toBeVisible({ timeout });
+        await expect.soft(E2ELocators.profileRowDelete(this.page, on.defaultNumber), `Delete icon for ${on.defaultNumber} ${what}`).toBeVisible({ timeout });
+        for (const o of when.options) {
+          await expect.soft(E2ELocators.profileToggleTrack(this.page, o.title), `"${o.title}" toggle ${what}`).toBeVisible({ timeout });
+        }
+      }
+    };
+
+    // click Save Changes -> success pop-up -> buttons go away
+    const saveAndExpectToast = async (what) => {
+      await expect(toast(), 'Previous pop-up should be gone').toHaveCount(0, { timeout: n.toastTimeoutMs });
+      await save().click();
+      await expect(text(n.toastTitle), `"${n.toastTitle}" pop-up title ${what}`).toBeVisible({ timeout });
+      await expect(toast(), `Pop-up "${n.toastMessage}" ${what}`).toBeVisible({ timeout });
+      await expect(save(), `"${n.saveButton}" should disappear ${what}`).toBeHidden({ timeout });
+      console.log(`Saved ${what} -> pop-up: ${n.toastTitle} - ${n.toastMessage}`);
+    };
+
+    // 1. click the Notifications tab
+    await E2ELocators.profileTab(this.page, n.tabName).click();
+    console.log(`Clicked "${n.tabName}" tab`);
+
+    // 2. title, description and bell icon
+    await expect(text(n.title), `"${n.title}" title`).toBeVisible({ timeout });
+    await expect(text(n.description), `"${n.description}" description`).toBeVisible({ timeout });
+    await expect(E2ELocators.profileIcon(this.page, n.title), 'Bell icon').toBeVisible({ timeout });
+    console.log(`Title: "${n.title}" | Description: "${n.description}" | bell icon shown`);
+
+    // make sure we start from OFF
+    if (await isOn(n.title)) {
+      await flip(n.title);
+      await expect.poll(() => isOn(n.title), { timeout }).toBe(false);
+      await saveAndExpectToast('to reset to OFF');
+    }
+
+    // 3. enable -> "Notify me on" (phone field, default number + delete icon) and "Notify me when"
+    await expectSections(false, 'while notifications are OFF');
+    await flip(n.title);
+    await expect.poll(() => isOn(n.title), { message: `"${n.title}" should be ON`, timeout }).toBe(true);
+    await expectSections(true, 'after enabling');
+    await expect(save(), `"${n.saveButton}" button`).toBeVisible({ timeout });
+    await expect(cancel(), `"${n.cancelButton}" button`).toBeVisible({ timeout });
+    for (const o of when.options) {
+      expect(await isOn(o.title), `"${o.title}" should be ON by default`).toBe(true);
+    }
+    console.log(`Enabled. "${on.title}": default number ${on.defaultNumber} with delete icon | "${when.title}": ${when.options.map((o) => o.title).join(' | ')}`);
+
+    // 4. save
+    await saveAndExpectToast('after enabling');
+
+    // 5. disable -> Cancel -> still enabled, nothing changed
+    await flip(n.title);
+    await expect.poll(() => isOn(n.title), { timeout }).toBe(false);
+    await expectSections(false, 'while notifications are OFF (before Cancel)');
+    await cancel().click();
+    await expect.poll(() => isOn(n.title), { message: `"${n.title}" should stay ON after "${n.cancelButton}"`, timeout }).toBe(true);
+    await expectSections(true, `after "${n.cancelButton}"`);
+    await expect(save(), `"${n.saveButton}" should disappear after "${n.cancelButton}"`).toBeHidden({ timeout });
+    console.log(`"${n.cancelButton}" discarded the change; notifications still ON`);
+
+    // 6. disable again -> Save Changes -> success pop-up
+    await flip(n.title);
+    await expect.poll(() => isOn(n.title), { timeout }).toBe(false);
+    await saveAndExpectToast('after disabling');
+    await expectSections(false, 'after saving OFF');
+    console.log('Notifications disabled and saved');
   }
 }
