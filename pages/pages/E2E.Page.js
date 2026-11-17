@@ -2171,8 +2171,24 @@ async verifyAssessmentsPageTitle(title, timeout) {
     const first = await this.#verifyKeyShown('Active key', dialog, sk, false);
 
     // 6. copy to clipboard -> success message
-    await dialog.getByRole('button', { name: sk.copyButton }).click();
-    await expect(this.page.getByText(sk.copiedMessage).first(), `Message "${sk.copiedMessage}"`).toBeVisible({ timeout: sk.toastTimeoutMs });
+    // The browser must be allowed to use the clipboard, otherwise the portal itself shows "Failed to copy to clipboard".
+    // (Chromium only: other browsers do not know these permissions, so the call is simply ignored there.)
+    if (sk.clipboardPermissions && sk.clipboardPermissions.length) {
+      await this.page.context()
+        .grantPermissions(sk.clipboardPermissions, { origin: new URL(this.page.url()).origin })
+        .catch(() => {});
+    }
+    await this.page.bringToFront();                       // the page must be focused for the clipboard to be written
+    const copiedMsg = this.page.getByText(sk.copiedMessage).first();
+    const copyFailedMsg = this.page.getByText(sk.copyFailedMessage).first();
+    const copyBtn = dialog.getByRole('button', { name: sk.copyButton });
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await copyBtn.click();
+      await expect(copiedMsg.or(copyFailedMsg), `Copy to Clipboard (try ${attempt}): a message should appear`).toBeVisible({ timeout: sk.toastTimeoutMs });
+      if (await copiedMsg.isVisible()) break;
+      await expect(copyFailedMsg, 'wait for the failed-copy message to go away before trying again').toBeHidden({ timeout: sk.toastTimeoutMs }).catch(() => {});
+    }
+    await expect(copiedMsg, `Message "${sk.copiedMessage}" (the browser blocked the clipboard if the portal showed "${sk.copyFailedMessage}")`).toBeVisible({ timeout: sk.toastTimeoutMs });
 
     // 7-9. Regenerate Key -> confirmation text with Yes / Cancel -> Cancel
     const regen = dialog.getByRole('button', { name: sk.regenerateButton, exact: true });
@@ -2334,6 +2350,13 @@ async verifyAssessmentsPageTitle(title, timeout) {
     await this.#revealAction(row, actionsIdx, reportBtn, ir.settleMs, `Ivory Report row ${found.index + 1}`, ir.buttonName);
     await expect(reportBtn.first(), `"${ir.buttonName}" should be enabled`).toBeEnabled();
 
+    // The report may open in a new tab, in this tab, or be handed to the browser as a download (a PDF is downloaded instead of
+    // shown when the browser has no PDF viewer, e.g. headless Chromium and Firefox). Collect downloads from this tab and any new tab.
+    const downloads = [];
+    const onDownload = (d) => downloads.push(d);
+    const onNewPage = (p) => p.on('download', onDownload);
+    this.page.on('download', onDownload);
+    this.page.context().on('page', onNewPage);
     const popupPromise = this.page.context().waitForEvent('page', { timeout: ir.reportOpenTimeoutMs }).catch(() => null);
     const urlBefore = this.page.url();
     await reportBtn.first().click();
@@ -2342,14 +2365,26 @@ async verifyAssessmentsPageTitle(title, timeout) {
     const popup = await popupPromise;
     const reportPage = popup || this.page;
     if (!popup) {
-      await expect.poll(() => this.page.url(), { message: 'The report should open in a new tab or in this tab', timeout: ir.reportOpenTimeoutMs }).not.toBe(urlBefore);
+      await expect.poll(() => this.page.url() !== urlBefore || downloads.length > 0, { message: 'The report should open in a new tab, in this tab, or download', timeout: ir.reportOpenTimeoutMs }).toBe(true);
     }
-    await expect.poll(() => reportPage.url(), { message: `Report address should match ${ir.reportUrlPattern}`, timeout: ir.reportOpenTimeoutMs }).toMatch(new RegExp(ir.reportUrlPattern, 'i'));
-    console.log(`Report opened (${popup ? 'new tab' : 'same tab'}): ${reportPage.url().split('?')[0]}`);
+    // The address of the report: the tab's address (a new tab starts blank), or the downloaded file's address / name
+    const isBlank = (u) => !u || u === 'about:blank';
+    const reportAddress = () => {
+      if (!isBlank(reportPage.url())) return reportPage.url();
+      return downloads.length ? `${downloads[0].url()} ${downloads[0].suggestedFilename()}` : '';
+    };
+    try {
+      await expect.poll(reportAddress, { message: `Report address should match ${ir.reportUrlPattern}`, timeout: ir.reportOpenTimeoutMs }).toMatch(new RegExp(ir.reportUrlPattern, 'i'));
+    } finally {
+      this.page.off('download', onDownload);
+      this.page.context().off('page', onNewPage);
+    }
+    const reportKind = downloads.length && isBlank(reportPage.url()) ? 'downloaded file' : (popup ? 'new tab' : 'same tab');
+    console.log(`Report opened (${reportKind}): ${reportAddress().split('?')[0]}`);
 
     // 8. come back to the assessments page
     if (popup) {
-      await popup.close();
+      if (!popup.isClosed()) await popup.close();
       await this.page.bringToFront();
     } else {
       await this.page.goBack();
