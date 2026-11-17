@@ -1,6 +1,5 @@
 import { expect } from '@playwright/test';
 import { E2ELocators } from '../locators/E2E.locators.js';
-import { LoginLocators } from '../locators/Login.locators.js';
 
 // Converts [r, g, b] (0-255) to a hue angle (0-360)
 const rgbToHue = ([r, g, b]) => {
@@ -57,8 +56,8 @@ const normalizePath = (pathname) => pathname.replace(/\/+$/, '') || '/';
 export class E2EPage {
   constructor(page) {
     this.page = page;
-    this.logoImage = LoginLocators.logoImage(page);
-    this.loginText = LoginLocators.loginText(page);
+    this.logoImage = E2ELocators.logoImage(page);   // the logo shown inside the portal ("Test Partner"), not the login-page logo
+    this.loginText = E2ELocators.loginText(page);
     this.dashboardClick = E2ELocators.dashboardClick(page);
     this.assessmentClick = E2ELocators.assessmentClick(page);
     this.userClick = E2ELocators.userClick(page);
@@ -2903,9 +2902,20 @@ async verifyUserSorting(sort, timeout) {
     const m = (await dialog.innerText()).match(keyRe);
     console.log(`Show Key pop-up: key=${m[1]}, ${m[2]}: ${m[3]}`);
 
-    // Content of the pop-up
-    await expect.soft(dialog.getByText(showKey.infoMessage.replace(/^Info:\s*/, ''), { exact: false })).toBeVisible();
-    await expect.soft(dialog.getByRole('button', { name: showKey.copyButton })).toBeVisible();
+    // Content of the pop-up. It depends on the state of the key:
+    //  - expired key: the expiry message, the key marked "(Expired)", "Regenerate Key", "Close" (no info text, no copy button)
+    //  - active key:  the info text and the "Copy to Clipboard" button as well
+    const popupText = await dialog.innerText();
+    const isExpired = (await dialog.getByText(showKey.expiredMessage).count()) > 0
+      || new RegExp(showKey.expiredTag, 'i').test(popupText);
+    if (isExpired) {
+      await expect.soft(dialog.getByText(showKey.expiredMessage), `Expired key: "${showKey.expiredMessage}"`).toBeVisible();
+      expect.soft(popupText, 'Expired key pop-up should be marked as expired').toMatch(new RegExp(showKey.expiredTag, 'i'));
+      console.log('Show Key pop-up: the key is expired (info text and copy button are shown only for an active key)');
+    } else {
+      await expect.soft(dialog.getByText(showKey.infoMessage.replace(/^Info:\s*/, ''), { exact: false }), `Info text "${showKey.infoMessage}"`).toBeVisible();
+      await expect.soft(dialog.getByRole('button', { name: showKey.copyButton }), `"${showKey.copyButton}" button`).toBeVisible();
+    }
     await expect.soft(dialog.getByRole('button', { name: showKey.regenerateButton })).toBeVisible();
     await expect.soft(dialog.getByRole('button', { name: showKey.closeButton, exact: true })).toBeVisible();
 
@@ -3074,6 +3084,9 @@ async verifyUserSorting(sort, timeout) {
     const cards = E2ELocators.productCards(this.page, products.cardAction);
     const tabOf = (label) => E2ELocators.productTab(this.page, esc(label), products.tabCountPattern);
     const countOf = async (label) => Number((await tabOf(label).innerText()).match(/\d+/)[0]);
+    // an inactive card shows one action button: "Contact Sales" or "Enable" (both come from the data file)
+    const inactiveActions = (products.inactiveActions && products.inactiveActions.length) ? products.inactiveActions : [products.contactSales];
+    const actionsLabel = inactiveActions.join('" or "');
 
     // reads every card on screen: name, status badge, "View details" link, "Contact Sales" button
     const readCards = async () => {
@@ -3086,7 +3099,7 @@ async verifyUserSorting(sort, timeout) {
           active: (await E2ELocators.productCardBadge(card, products.activeBadge).count()) > 0,
           inactive: (await E2ELocators.productCardBadge(card, products.inactiveBadge).count()) > 0,
           details: (await card.getByText(products.cardAction, { exact: true }).count()) > 0,
-          contact: (await E2ELocators.productContactSales(card, products.contactSales).count()) > 0,
+          contact: (await E2ELocators.productInactiveAction(card, inactiveActions).count()) > 0,
         });
       }
       return list;
@@ -3108,14 +3121,14 @@ async verifyUserSorting(sort, timeout) {
     // 1. "Active" tab: all the active assessment names
     const active = await openTab(activeL);
     expect.soft(active.every((c) => c.active), `Every card on the "${activeL}" tab should show the "${products.activeBadge}" badge`).toBe(true);
-    expect.soft(active.some((c) => c.contact), `No card on the "${activeL}" tab should show "${products.contactSales}"`).toBe(false);
+    expect.soft(active.some((c) => c.contact), `No card on the "${activeL}" tab should show "${actionsLabel}"`).toBe(false);
     expect.soft(sameSet(active.map((c) => c.name), activeNames), `"${activeL}" tab should list exactly the active assessments of the "${allL}" tab`).toBe(true);
     console.log(`"${activeL}" tab (${active.length}):\n${active.map((c, i) => `${i + 1}. ${c.name}`).join('\n')}`);
 
     // 2. "Available" tab: all the available (not active) assessment names, each with "Contact Sales"
     const avail = await openTab(availL);
     expect.soft(avail.some((c) => c.active), `No card on the "${availL}" tab should show the "${products.activeBadge}" badge`).toBe(false);
-    expect.soft(avail.every((c) => c.contact), `Every card on the "${availL}" tab should show "${products.contactSales}"`).toBe(true);
+    expect.soft(avail.every((c) => c.contact), `Every card on the "${availL}" tab should show "${actionsLabel}"`).toBe(true);
     expect.soft(sameSet(avail.map((c) => c.name), inactiveNames), `"${availL}" tab should list exactly the inactive assessments of the "${allL}" tab`).toBe(true);
     console.log(`"${availL}" tab (${avail.length}):\n${avail.map((c, i) => `${i + 1}. ${c.name}`).join('\n')}`);
 
@@ -3125,16 +3138,16 @@ async verifyUserSorting(sort, timeout) {
     const inactive = back.filter((c) => !c.active);
     if (inactive.length > 0) {
       for (const c of inactive) {
-        expect.soft(c.contact, `Inactive assessment "${c.name}" should show "${products.contactSales}"`).toBe(true);
+        expect.soft(c.contact, `Inactive assessment "${c.name}" should show "${actionsLabel}"`).toBe(true);
         expect.soft(c.details, `Inactive assessment "${c.name}" should not show "${products.cardAction}"`).toBe(false);
       }
-      console.log(`"${allL}" tab: ${inactive.length} inactive assessment(s) show "${products.contactSales}": ${inactive.map((c) => c.name).join(', ')}`);
+      console.log(`"${allL}" tab: ${inactive.length} inactive assessment(s) show "${actionsLabel}": ${inactive.map((c) => c.name).join(', ')}`);
     } else {
-      expect.soft(back.some((c) => c.contact), `No inactive assessment, so no "${products.contactSales}" should be shown`).toBe(false);
-      console.log(`"${allL}" tab: no inactive assessment present, so no "${products.contactSales}" is shown`);
+      expect.soft(back.some((c) => c.contact), `No inactive assessment, so no "${actionsLabel}" should be shown`).toBe(false);
+      console.log(`"${allL}" tab: no inactive assessment present, so no "${actionsLabel}" is shown`);
     }
     for (const c of back.filter((x) => x.active)) {
-      expect.soft(c.contact, `Active assessment "${c.name}" should not show "${products.contactSales}"`).toBe(false);
+      expect.soft(c.contact, `Active assessment "${c.name}" should not show "${actionsLabel}"`).toBe(false);
     }
   } 
     async verifyProductsSearch(products, timeout = 15000) {

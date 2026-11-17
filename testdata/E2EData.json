@@ -546,7 +546,11 @@
       "resetLink": "Reset filters",
       "clearIcon": "Clear",
       "settleMs": 600
-    }
+    },
+    "inactiveActions": [
+      "Contact Sales",
+      "Enable"
+    ]
   },
   "profile": {
     "menuName": "Profile",

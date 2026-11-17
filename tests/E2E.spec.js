@@ -1,19 +1,59 @@
-import { test, expect } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
 import { LoginPage } from '../pages/pages/Login.Page.js';
 import { E2EPage } from '../pages/pages/E2E.Page.js';
 import loginData from '../testdata/LoginData.json';
 import e2eData from '../testdata/E2EData.json';
 const LOGIN_URL = 'https://test-partner.liveivory.com/login';
+const DASHBOARD_URL = new URL('/dashboard', LOGIN_URL).href;
+
+// ---------------------------------------------------------------------------------------------
+// ONE LOGIN FOR ALL TESTS
+// The first test of a worker signs in once; that session (cookies, localStorage, sessionStorage)
+// is kept in memory and every other test starts already logged in, on the Dashboard.
+// With "workers: 1" the whole run uses a single login.
+// ---------------------------------------------------------------------------------------------
+const test = base.extend({
+  workerAuth: [async ({ browser }, use) => {
+    const page = await browser.newPage({ storageState: undefined });   // a clean browser, not logged in
+    const login = new LoginPage(page);
+    await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await login.fillEmail(loginData.validEmail);
+    await login.fillPassword(loginData.validPassword);
+    await login.checkTermsCheckbox();
+    await login.verifySignInButtonEnabled();
+    await login.clickSignIn();
+    await new E2EPage(page).verifyWelcomeTest();                       // signed in: the Dashboard is shown
+    const state = await page.context().storageState();                 // cookies + localStorage
+    const session = await page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)));
+    const origin = new URL(page.url()).origin;
+    await page.close();
+    await use({ state, session, origin });
+  }, { scope: 'worker', timeout: 120_000 }],
+
+  // every test's browser starts with the saved session
+  storageState: async ({ workerAuth }, use) => { await use(workerAuth.state); },
+
+  // sessionStorage is not part of storageState, so it is put back before the page loads
+  page: async ({ page, workerAuth }, use) => {
+    if (Object.keys(workerAuth.session).length) {
+      await page.addInitScript(([origin, data]) => {
+        if (location.origin !== origin) return;
+        for (const [k, v] of Object.entries(data)) {
+          if (sessionStorage.getItem(k) === null) sessionStorage.setItem(k, v);
+        }
+      }, [workerAuth.origin, workerAuth.session]);
+    }
+    await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });   // already logged in
+    await use(page);
+  },
+});
 
 test.describe('Ivory-PartnerLogin', () => {
-  let login;
 
-  test.beforeEach(async ({ page }) => {
-    login = new LoginPage(page);
+  // The login test uses the plain test (no saved session) so it really signs in
+  base('TC_Login_010 - Verify user can sign in with valid email and password', async ({ page }) => {
+    const login = new LoginPage(page);
     await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  });
-
-  test('TC_Login_010 - Verify user can sign in with valid email and password', async () => {
     await login.fillEmail(loginData.validEmail);
     await login.fillPassword(loginData.validPassword);
     await login.checkTermsCheckbox();
@@ -28,12 +68,6 @@ test.describe('Ivory-PartnerLogin', () => {
 
     const dashboard = new E2EPage(page);
 
-    // Log in first so the dashboard is actually reachable
-    await login.fillEmail(loginData.validEmail);
-    await login.fillPassword(loginData.validPassword);
-    await login.checkTermsCheckbox();
-    await login.verifySignInButtonEnabled();
-    await login.clickSignIn();
 
     await expect(dashboard.logoImage).toBeVisible();
     await expect(dashboard.loginText).toBeVisible();
@@ -107,12 +141,6 @@ test.describe('Ivory-PartnerLogin', () => {
     const nav = new E2EPage(page);
     const ap = e2eData.assessmentsPage;
 
-    // Log in first so the portal is reachable
-    await login.fillEmail(loginData.validEmail);
-    await login.fillPassword(loginData.validPassword);
-    await login.checkTermsCheckbox();
-    await login.verifySignInButtonEnabled();
-    await login.clickSignIn();
 
     await expect(nav.logoImage).toBeVisible();
     await nav.verifyWelcomeTest();                          // landed on the Dashboard
@@ -208,12 +236,6 @@ test.describe('Ivory-PartnerLogin', () => {
      test.setTimeout(e2eData.assessmentsPage.testTimeoutMs);
     const user = new E2EPage(page);
 
-    // Log in first so the portal is reachable
-  await login.fillEmail(loginData.validEmail);
-  await login.fillPassword(loginData.validPassword);
-  await login.checkTermsCheckbox();
-  await login.verifySignInButtonEnabled();
-  await login.clickSignIn();
 
   //  Click the Users tab
   await user.clickUserClick();
@@ -252,12 +274,6 @@ test.describe('Ivory-PartnerLogin', () => {
 
     const product = new E2EPage(page);
 
-    // Log in first so the portal is reachable
-    await login.fillEmail(loginData.validEmail);
-    await login.fillPassword(loginData.validPassword);
-    await login.checkTermsCheckbox();
-    await login.verifySignInButtonEnabled();
-    await login.clickSignIn();
 
     // Click the Products tab
     await product.clickProductClick();
@@ -277,12 +293,6 @@ test.describe('Ivory-PartnerLogin', () => {
 
     const profile = new E2EPage(page);
 
-    // Log in first so the portal is reachable
-    await login.fillEmail(loginData.validEmail);
-    await login.fillPassword(loginData.validPassword);
-    await login.checkTermsCheckbox();
-    await login.verifySignInButtonEnabled();
-    await login.clickSignIn();
 
     // Click the Profile menu
     await profile.clickProfileMenu(e2eData.profile, e2eData.profile.loadTimeoutMs);

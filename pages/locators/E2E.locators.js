@@ -1,4 +1,3 @@
-
 export const ACTIVE_TAB_PATTERN = /active|selected|current|highlight/i;
 
 export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -137,6 +136,8 @@ userKeyCancelIcon: (dialog, name) => dialog.getByRole('button', { name }).or(dia
   productDialog: (page, name, labels) => labels.reduce((loc, l) => loc.filter({ has: page.getByText(new RegExp(`^\\s*${l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')) }), page.locator('div').filter({ has: page.getByText(name, { exact: true }) })).last(),
   productDialogLabel: (dialog, text) => dialog.getByText(new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')).first(),
   productContactSales: (card, name) => card.getByRole('button', { name, exact: true }),
+  // the action button of an inactive card: any one of the names ("Contact Sales", "Enable", ...)
+  productInactiveAction: (card, names) => card.getByRole('button', { name: new RegExp(`^\\s*(?:${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*$`) }),
   productDialogClose: (dialog, name) => dialog.getByRole('button', { name }).or(dialog.locator('button').first()).first(),
     productSearchBox: (page, name) => page.getByRole('textbox', { name }),
   // the cross icon = the last button next to the search box (it comes after the tabs in the page)
